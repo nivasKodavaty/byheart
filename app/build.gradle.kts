@@ -16,8 +16,8 @@ android {
         versionCode = 1
         versionName = "1.0"
 
-        // Base URL — 10.0.2.2 is localhost from the Android emulator
-        buildConfigField("String", "BASE_URL", "\"http://10.0.2.2:8080/\"")
+        // Base URL — machine's LAN IP for testing on a physical device
+        buildConfigField("String", "BASE_URL", "\"http://192.168.29.67:8080/\"")
     }
 
     buildTypes {
@@ -85,6 +85,14 @@ dependencies {
     implementation(libs.retrofit.converter.gson)
     implementation(libs.okhttp)
     implementation(libs.okhttp.logging)
+
+    // Rich text editor
+    implementation(libs.richeditor.compose)
+
+    // WorkManager + Hilt-Work integration
+    implementation(libs.workmanager)
+    implementation(libs.hilt.work)
+    ksp(libs.hilt.work.compiler)
 
     // Coroutines
     implementation(libs.coroutines.android)

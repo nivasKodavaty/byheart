@@ -8,5 +8,7 @@ data class NoteEntity(
     @PrimaryKey val id: Long,
     val title: String,
     val content: String?,
-    val updatedAt: String
+    val updatedAt: String,
+    val isPinned: Boolean = false,
+    val folderName: String? = null
 )

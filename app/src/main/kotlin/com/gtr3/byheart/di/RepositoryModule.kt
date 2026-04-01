@@ -1,8 +1,10 @@
 package com.gtr3.byheart.di
 
 import com.gtr3.byheart.data.repository.AuthRepositoryImpl
+import com.gtr3.byheart.data.repository.CollabRepositoryImpl
 import com.gtr3.byheart.data.repository.NotesRepositoryImpl
 import com.gtr3.byheart.domain.repository.AuthRepository
+import com.gtr3.byheart.domain.repository.CollabRepository
 import com.gtr3.byheart.domain.repository.NotesRepository
 import dagger.Binds
 import dagger.Module
@@ -19,4 +21,7 @@ abstract class RepositoryModule {
 
     @Binds @Singleton
     abstract fun bindNotesRepository(impl: NotesRepositoryImpl): NotesRepository
+
+    @Binds @Singleton
+    abstract fun bindCollabRepository(impl: CollabRepositoryImpl): CollabRepository
 }

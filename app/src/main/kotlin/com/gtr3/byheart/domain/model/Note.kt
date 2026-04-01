@@ -5,6 +5,8 @@ data class Note(
     val title: String,
     val content: String?,
     val updatedAt: String,
+    val isPinned: Boolean = false,
+    val folderName: String? = null,
     val messages: List<Message> = emptyList()
 )
 

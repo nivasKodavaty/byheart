@@ -7,8 +7,14 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface NoteDao {
 
-    @Query("SELECT * FROM notes ORDER BY updatedAt DESC")
+    @Query("SELECT * FROM notes ORDER BY isPinned DESC, updatedAt DESC")
     fun getAllNotes(): Flow<List<NoteEntity>>
+
+    @Query("SELECT DISTINCT folderName FROM notes WHERE folderName IS NOT NULL ORDER BY folderName ASC")
+    fun getDistinctFolders(): Flow<List<String>>
+
+    @Query("SELECT * FROM notes WHERE id = :id")
+    fun getNoteByIdFlow(id: Long): Flow<NoteEntity?>
 
     @Query("SELECT * FROM notes WHERE id = :id")
     suspend fun getNoteById(id: Long): NoteEntity?

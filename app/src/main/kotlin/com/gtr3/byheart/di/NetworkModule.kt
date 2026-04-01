@@ -1,7 +1,9 @@
 package com.gtr3.byheart.di
 
+import com.google.gson.Gson
 import com.gtr3.byheart.BuildConfig
 import com.gtr3.byheart.data.remote.api.AuthApi
+import com.gtr3.byheart.data.remote.api.CollabApi
 import com.gtr3.byheart.data.remote.api.NotesApi
 import com.gtr3.byheart.data.remote.interceptor.AuthInterceptor
 import dagger.Module
@@ -46,4 +48,11 @@ object NetworkModule {
     @Provides @Singleton
     fun provideNotesApi(retrofit: Retrofit): NotesApi =
         retrofit.create(NotesApi::class.java)
+
+    @Provides @Singleton
+    fun provideCollabApi(retrofit: Retrofit): CollabApi =
+        retrofit.create(CollabApi::class.java)
+
+    @Provides @Singleton
+    fun provideGson(): Gson = Gson()
 }
