@@ -1,0 +1,2 @@
+-keep class com.gtr3.anote.data.remote.dto.** { *; }
+-keep class com.gtr3.anote.domain.model.** { *; }
