@@ -2,8 +2,8 @@ package com.gtr3.byheart.presentation.auth
 
 data class AuthState(
     val isLoading: Boolean = false,
-    val email: String = "",
-    val password: String = "",
+    val email: String = "test@test.com",
+    val password: String = "password123",
     val error: String? = null
 )
 

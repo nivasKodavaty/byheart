@@ -44,8 +44,13 @@ fun NavGraph(startDestination: String = Screen.Login.route) {
 
         composable(Screen.CreateNote.route) {
             NoteDetailScreen(
-                noteId          = null,
-                onNavigateBack  = { navController.popBackStack() }
+                noteId             = null,
+                onNavigateBack     = { navController.popBackStack() },
+                onNavigateToDetail = { id ->
+                    navController.navigate(Screen.NoteDetail.route(id)) {
+                        popUpTo(Screen.CreateNote.route) { inclusive = true }
+                    }
+                }
             )
         }
 
@@ -54,8 +59,9 @@ fun NavGraph(startDestination: String = Screen.Login.route) {
             arguments = listOf(navArgument("noteId") { type = NavType.LongType })
         ) { backStack ->
             NoteDetailScreen(
-                noteId         = backStack.arguments?.getLong("noteId"),
-                onNavigateBack = { navController.popBackStack() }
+                noteId             = backStack.arguments?.getLong("noteId"),
+                onNavigateBack     = { navController.popBackStack() },
+                onNavigateToDetail = {}
             )
         }
     }

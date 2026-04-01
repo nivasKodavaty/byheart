@@ -1,6 +1,6 @@
 package com.gtr3.byheart.data.remote.dto
 
-data class CreateNoteRequest(val title: String)
+data class CreateNoteRequest(val title: String, val content: String? = null, val useAi: Boolean = false)
 
 data class UpdateNoteRequest(
     val noteId: Long,
