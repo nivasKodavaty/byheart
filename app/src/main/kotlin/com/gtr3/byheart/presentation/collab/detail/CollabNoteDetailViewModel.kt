@@ -195,8 +195,11 @@ class CollabNoteDetailViewModel @Inject constructor(
     private fun leaveNote() {
         val note = _state.value.note ?: return
         viewModelScope.launch {
-            collabRepository.leaveCollabNote(note.shareCode)
-            _effect.send(CollabNoteDetailEffect.NoteLeft)
+            when (val result = collabRepository.leaveCollabNote(note.shareCode)) {
+                is Result.Success -> _effect.send(CollabNoteDetailEffect.NoteLeft)
+                is Result.Error   -> _effect.send(CollabNoteDetailEffect.ShowError(result.message))
+                else -> Unit
+            }
         }
     }
 
