@@ -5,7 +5,9 @@ import com.gtr3.byheart.data.local.datastore.AuthDataStore
 import com.gtr3.byheart.data.remote.api.AuthApi
 import com.gtr3.byheart.data.remote.dto.LoginRequest
 import com.gtr3.byheart.data.remote.dto.RegisterRequest
+import com.gtr3.byheart.data.remote.dto.UpdateProfileRequestDto
 import com.gtr3.byheart.domain.model.AuthResult
+import com.gtr3.byheart.domain.model.UserProfile
 import com.gtr3.byheart.domain.repository.AuthRepository
 import javax.inject.Inject
 
@@ -32,4 +34,20 @@ class AuthRepositoryImpl @Inject constructor(
     override suspend fun getToken(): String? = dataStore.getToken()
 
     override suspend fun clearToken() = dataStore.clearToken()
+
+    override suspend fun getProfile(): Result<UserProfile> =
+        runCatching {
+            val dto = api.getProfile()
+            Result.Success(UserProfile(dto.email, dto.displayName, dto.dateOfBirth, dto.sex))
+        }.getOrElse { Result.Error(it.message ?: "Failed to load profile") }
+
+    override suspend fun updateProfile(
+        displayName: String?,
+        dateOfBirth: String?,
+        sex: String?
+    ): Result<UserProfile> =
+        runCatching {
+            val dto = api.updateProfile(UpdateProfileRequestDto(displayName, dateOfBirth, sex))
+            Result.Success(UserProfile(dto.email, dto.displayName, dto.dateOfBirth, dto.sex))
+        }.getOrElse { Result.Error(it.message ?: "Failed to update profile") }
 }

@@ -14,4 +14,5 @@ sealed class Screen(val route: String) {
     data object CollabDetail : Screen("collab_detail/{shareCode}") {
         fun route(shareCode: String) = "collab_detail/$shareCode"
     }
+    data object Settings : Screen("settings")
 }

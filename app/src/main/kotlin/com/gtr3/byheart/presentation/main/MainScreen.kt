@@ -37,7 +37,8 @@ private enum class MainTab(val label: String, val icon: ImageVector, val route: 
 fun MainScreen(
     onNavigateToNoteDetail: (Long) -> Unit,
     onNavigateToCreateNote: () -> Unit,
-    onNavigateToCollabDetail: (String) -> Unit
+    onNavigateToCollabDetail: (String) -> Unit,
+    onNavigateToSettings: () -> Unit = {}
 ) {
     val bottomNavController = rememberNavController()
     val backStack by bottomNavController.currentBackStackEntryAsState()
@@ -76,8 +77,9 @@ fun MainScreen(
         ) {
             composable(Screen.NotesList.route) {
                 NotesListScreen(
-                    onNavigateToDetail = onNavigateToNoteDetail,
-                    onNavigateToCreate = onNavigateToCreateNote
+                    onNavigateToDetail   = onNavigateToNoteDetail,
+                    onNavigateToCreate   = onNavigateToCreateNote,
+                    onNavigateToSettings = onNavigateToSettings
                 )
             }
             composable(Screen.CollabList.route) {

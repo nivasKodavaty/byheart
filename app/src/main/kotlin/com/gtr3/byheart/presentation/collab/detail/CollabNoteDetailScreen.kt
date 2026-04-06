@@ -7,18 +7,24 @@ import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ExitToApp
+import androidx.compose.material.icons.automirrored.filled.FormatListBulleted
 import androidx.compose.material.icons.automirrored.filled.Redo
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.automirrored.filled.Undo
@@ -27,17 +33,19 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -63,34 +71,32 @@ fun CollabNoteDetailScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val richTextState = rememberRichTextState()
     var isInitializing by remember { mutableStateOf(false) }
+    var showHeadingSheet by remember { mutableStateOf(false) }
     var capturedRange by remember { mutableStateOf(TextRange.Zero) }
     val coroutineScope = rememberCoroutineScope()
     val context = LocalContext.current
-    val clipboard = LocalClipboardManager.current
     val snackbarHostState = remember { SnackbarHostState() }
 
-    // ── Undo / Redo ────────────────────────────────────────────────────────────
     val undoStack = remember { ArrayDeque<String>() }
     val redoStack = remember { ArrayDeque<String>() }
     var debounceJob by remember { mutableStateOf<Job?>(null) }
 
-    fun pushUndo(html: String) {
-        if (undoStack.lastOrNull() == html) return
-        undoStack.addLast(html)
-        if (undoStack.size > 5) undoStack.removeFirst()
-        redoStack.clear()
+    fun pushUndo(stack: ArrayDeque<String>, html: String) {
+        if (stack.lastOrNull() == html) return
+        stack.addLast(html)
+        while (stack.size > 5) stack.removeFirst()
     }
 
     val notifPermLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { }
 
-    // ── Load note ──────────────────────────────────────────────────────────────
+    // ── Load ──────────────────────────────────────────────────────────────────
     LaunchedEffect(shareCode) {
         viewModel.onIntent(CollabNoteDetailIntent.Load(shareCode))
     }
 
-    // ── Polling — every 5 seconds ──────────────────────────────────────────────
+    // ── Poll every 5 s ────────────────────────────────────────────────────────
     LaunchedEffect(shareCode) {
         while (true) {
             delay(5_000L)
@@ -98,98 +104,94 @@ fun CollabNoteDetailScreen(
         }
     }
 
-    // ── Initial content load into editor ──────────────────────────────────────
+    // ── Initial content load ──────────────────────────────────────────────────
     LaunchedEffect(state.note?.shareCode) {
-        val note = state.note ?: return@LaunchedEffect
+        state.note ?: return@LaunchedEffect
+        undoStack.clear(); redoStack.clear()
         isInitializing = true
-        val content = note.content ?: ""
-        if (content.startsWith("<")) richTextState.setHtml(content)
-        else richTextState.setMarkdown(content)
+        loadIntoEditor(richTextState, state.editedContent)
+        delay(100)
         isInitializing = false
-        pushUndo(richTextState.toHtml())
+        pushUndo(undoStack, richTextState.toHtml())
     }
 
-    // ── AI / poll content version reload ──────────────────────────────────────
+    // ── AI / poll version reload ───────────────────────────────────────────────
     LaunchedEffect(state.aiContentVersion) {
         if (state.aiContentVersion == 0) return@LaunchedEffect
+        pushUndo(undoStack, richTextState.toHtml())
+        redoStack.clear()
         isInitializing = true
-        val content = state.note?.content ?: ""
-        if (content.startsWith("<")) richTextState.setHtml(content)
-        else richTextState.setMarkdown(content)
+        loadIntoEditor(richTextState, state.editedContent)
+        delay(100)
         isInitializing = false
-        pushUndo(richTextState.toHtml())
+        pushUndo(undoStack, richTextState.toHtml())
     }
 
-    // ── Effects ────────────────────────────────────────────────────────────────
+    // ── Capture text selection ────────────────────────────────────────────────
+    LaunchedEffect(richTextState.selection) {
+        if (isInitializing) return@LaunchedEffect
+        val sel = richTextState.selection
+        if (!sel.collapsed && state.note != null) {
+            val text = richTextState.annotatedString.text
+            val selectedText = text.substring(
+                sel.start.coerceAtMost(text.length),
+                sel.end.coerceAtMost(text.length)
+            )
+            if (selectedText.isNotBlank()) {
+                capturedRange = sel
+                viewModel.onIntent(CollabNoteDetailIntent.TextSelected(selectedText, sel.start, sel.end))
+            }
+        }
+    }
+
+    // ── Effects ───────────────────────────────────────────────────────────────
     LaunchedEffect(Unit) {
         viewModel.effect.collectLatest { effect ->
             when (effect) {
                 CollabNoteDetailEffect.NavigateBack -> onNavigateBack()
                 CollabNoteDetailEffect.NoteLeft     -> onNavigateBack()
-                CollabNoteDetailEffect.ReloadEditor -> {
-                    isInitializing = true
-                    val content = state.note?.content ?: ""
-                    if (content.startsWith("<")) richTextState.setHtml(content)
-                    else richTextState.setMarkdown(content)
-                    isInitializing = false
-                    pushUndo(richTextState.toHtml())
-                }
+                CollabNoteDetailEffect.ReloadEditor -> { /* handled via aiContentVersion */ }
                 is CollabNoteDetailEffect.ConflictDetected -> {
-                    // Reload editor with latest server content
+                    pushUndo(undoStack, richTextState.toHtml())
                     isInitializing = true
-                    val latest = effect.latestContent ?: ""
-                    if (latest.startsWith("<")) richTextState.setHtml(latest)
-                    else richTextState.setMarkdown(latest)
+                    loadIntoEditor(richTextState, effect.latestContent ?: "")
+                    delay(100)
                     isInitializing = false
-                    pushUndo(richTextState.toHtml())
+                    pushUndo(undoStack, richTextState.toHtml())
                     snackbarHostState.showSnackbar(
-                        message     = "A collaborator saved changes. Your edit was not applied — latest version loaded.",
-                        duration    = SnackbarDuration.Long,
+                        message = "A collaborator saved — latest version loaded. Please review and save again.",
+                        duration = SnackbarDuration.Long,
                         withDismissAction = true
                     )
                     viewModel.onIntent(CollabNoteDetailIntent.AcceptConflict)
                 }
-                is CollabNoteDetailEffect.ShowError -> {
-                    snackbarHostState.showSnackbar(effect.message)
-                }
+                is CollabNoteDetailEffect.ShowError -> snackbarHostState.showSnackbar(effect.message)
                 is CollabNoteDetailEffect.ScheduleReminder -> {
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                         notifPermLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
                     }
                     ReminderScheduler.schedule(
-                        context          = context,
-                        noteId           = effect.noteId,
-                        noteTitle        = effect.noteTitle,
-                        reminderTitle    = effect.reminderTitle,
-                        triggerAtMillis  = effect.triggerAtMillis,
-                        reminderDays     = effect.reminderDays
+                        context         = context,
+                        noteId          = effect.noteId,
+                        noteTitle       = effect.noteTitle,
+                        reminderTitle   = effect.reminderTitle,
+                        triggerAtMillis = effect.triggerAtMillis,
+                        reminderDays    = effect.reminderDays
                     )
                 }
             }
         }
     }
 
-    // ── Listen to rich-text edits for undo debounce ───────────────────────────
+    // ── Track user edits ──────────────────────────────────────────────────────
     LaunchedEffect(richTextState.annotatedString) {
-        if (isInitializing) return@LaunchedEffect
+        if (isInitializing || state.note == null) return@LaunchedEffect
         viewModel.onIntent(CollabNoteDetailIntent.EditedContentChanged(richTextState.toHtml()))
         debounceJob?.cancel()
         debounceJob = coroutineScope.launch {
             delay(800L)
-            pushUndo(richTextState.toHtml())
-        }
-    }
-
-    // ── Apply selection replacement ────────────────────────────────────────────
-    val onApplyReplacement: () -> Unit = {
-        state.selectionReplacement?.let { replacement ->
-            val html = richTextState.toHtml()
-            val spliced = spliceHtmlAtPlainRange(html, state.selectionStart, state.selectionEnd, replacement)
-            isInitializing = true
-            richTextState.setHtml(spliced)
-            isInitializing = false
-            pushUndo(richTextState.toHtml())
-            viewModel.onIntent(CollabNoteDetailIntent.ApplySelectionReplacement)
+            pushUndo(undoStack, richTextState.toHtml())
+            redoStack.clear()
         }
     }
 
@@ -197,132 +199,227 @@ fun CollabNoteDetailScreen(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             CollabDetailTopBar(
-                shareCode    = state.note?.shareCode ?: shareCode,
-                participants = state.note?.participantCount ?: 0,
-                isSaving     = state.isSaving,
-                hasChanges   = state.hasUnsavedChanges,
-                onBack       = { viewModel.onIntent(CollabNoteDetailIntent.NavigateBack) },
-                onSave       = { viewModel.onIntent(CollabNoteDetailIntent.SaveContent(richTextState.toHtml())) },
-                onShareCode  = { viewModel.onIntent(CollabNoteDetailIntent.ShowShareCode) },
-                onLeave      = { viewModel.onIntent(CollabNoteDetailIntent.LeaveNote) }
+                shareCode  = state.note?.shareCode ?: shareCode,
+                isSaving   = state.isSaving,
+                hasChanges = state.hasUnsavedChanges,
+                onBack     = { viewModel.onIntent(CollabNoteDetailIntent.NavigateBack) },
+                onSave     = { viewModel.onIntent(CollabNoteDetailIntent.SaveContent(richTextState.toHtml())) },
+                onShareCode = { viewModel.onIntent(CollabNoteDetailIntent.ShowShareCode) },
+                onLeave    = { viewModel.onIntent(CollabNoteDetailIntent.LeaveNote) }
             )
         },
-        bottomBar = {
-            Column {
-                // Selection replacement banner
-                AnimatedVisibility(
-                    visible = state.selectionReplacement != null,
-                    enter   = fadeIn(),
-                    exit    = fadeOut()
-                ) {
-                    SelectionReplacementBanner(
-                        replacement = state.selectionReplacement ?: "",
-                        onApply     = onApplyReplacement,
-                        onDiscard   = { viewModel.onIntent(CollabNoteDetailIntent.DiscardSelectionReplacement) }
-                    )
-                }
-                // Formatting toolbar
-                CollabFormattingToolbar(
-                    richTextState = richTextState,
-                    canUndo       = undoStack.size > 1,
-                    canRedo       = redoStack.isNotEmpty(),
-                    onUndo = {
-                        if (undoStack.size > 1) {
-                            redoStack.addLast(undoStack.removeLast())
-                            isInitializing = true
-                            richTextState.setHtml(undoStack.last())
-                            isInitializing = false
-                        }
-                    },
-                    onRedo = {
-                        if (redoStack.isNotEmpty()) {
-                            val next = redoStack.removeLast()
-                            undoStack.addLast(next)
-                            isInitializing = true
-                            richTextState.setHtml(next)
-                            isInitializing = false
-                        }
-                    }
-                )
-                // Unified AI input
-                CollabAiInputBar(
-                    aiInput          = state.aiInput,
-                    isLoading        = state.isAiLoading || state.isSelectionLoading,
-                    selectionText    = state.selectionText,
-                    onValueChange    = { viewModel.onIntent(CollabNoteDetailIntent.AiInputChanged(it)) },
-                    onSend           = { viewModel.onIntent(CollabNoteDetailIntent.SendAiMessage) },
-                    onDismissSelect  = { viewModel.onIntent(CollabNoteDetailIntent.DismissSelectionEdit) }
-                )
-            }
-        }
+        containerColor = MaterialTheme.colorScheme.background
     ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-        ) {
-            // Title field
-            BasicTextField(
-                value         = state.editedTitle,
-                onValueChange = { viewModel.onIntent(CollabNoteDetailIntent.TitleChanged(it)) },
-                textStyle     = MaterialTheme.typography.headlineSmall.copy(
-                    fontWeight = FontWeight.Bold,
-                    color      = MaterialTheme.colorScheme.onBackground
-                ),
-                cursorBrush   = SolidColor(MaterialTheme.colorScheme.primary),
-                modifier      = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 12.dp),
-                decorationBox = { inner ->
-                    if (state.editedTitle.isEmpty()) {
-                        Text("Untitled", style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f))
-                    }
-                    inner()
-                }
-            )
 
-            // Last-edited-by + participant info row
-            state.note?.let { note ->
-                Row(
-                    modifier = Modifier.padding(horizontal = 20.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    note.lastEditedBy?.let {
-                        Text("Edited by $it", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text("·", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
-                    }
-                    Icon(Icons.Filled.Group, contentDescription = null, modifier = Modifier.size(12.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text("${note.participantCount} collaborator${if (note.participantCount != 1) "s" else ""}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Box(modifier = Modifier.fillMaxSize().padding(padding)) {
+            when {
+                state.isLoading && state.note == null -> {
+                    CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
                 }
-                Spacer(Modifier.height(4.dp))
+                state.note != null -> {
+                    val scrollState = rememberScrollState()
+
+                    Column(modifier = Modifier.fillMaxSize()) {
+                        // ── Scrollable content ────────────────────────────────
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .verticalScroll(scrollState)
+                                .padding(horizontal = 20.dp)
+                        ) {
+                            Spacer(Modifier.height(4.dp))
+
+                            // Editable title
+                            BasicTextField(
+                                value         = state.editedTitle,
+                                onValueChange = { viewModel.onIntent(CollabNoteDetailIntent.TitleChanged(it)) },
+                                textStyle     = MaterialTheme.typography.headlineMedium.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize   = 24.sp,
+                                    color      = MaterialTheme.colorScheme.onBackground
+                                ),
+                                cursorBrush   = SolidColor(MaterialTheme.colorScheme.primary),
+                                modifier      = Modifier.fillMaxWidth(),
+                                decorationBox = { inner ->
+                                    if (state.editedTitle.isEmpty()) {
+                                        Text(
+                                            "Untitled",
+                                            style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold, fontSize = 24.sp),
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+                                        )
+                                    }
+                                    inner()
+                                }
+                            )
+
+                            Spacer(Modifier.height(4.dp))
+
+                            // Collab meta row
+                            state.note?.let { note ->
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    note.lastEditedBy?.let {
+                                        Text("Edited by $it", style = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        Text("·", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                    Icon(Icons.Filled.Group, contentDescription = null, modifier = Modifier.size(12.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text(
+                                        "${note.participantCount} collaborator${if (note.participantCount != 1) "s" else ""}",
+                                        style = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp),
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+
+                            Spacer(Modifier.height(12.dp))
+                            HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f))
+                            Spacer(Modifier.height(14.dp))
+
+                            RichTextEditor(
+                                state    = richTextState,
+                                modifier = Modifier.fillMaxWidth().defaultMinSize(minHeight = 200.dp),
+                                colors   = RichTextEditorDefaults.richTextEditorColors(
+                                    containerColor          = MaterialTheme.colorScheme.background,
+                                    focusedIndicatorColor   = Color.Transparent,
+                                    unfocusedIndicatorColor = Color.Transparent,
+                                    cursorColor             = MaterialTheme.colorScheme.primary,
+                                    textColor               = MaterialTheme.colorScheme.onBackground
+                                ),
+                                textStyle = MaterialTheme.typography.bodyLarge.copy(lineHeight = 26.sp, fontSize = 16.sp),
+                                placeholder = {
+                                    Text(
+                                        "Start writing…",
+                                        style = MaterialTheme.typography.bodyLarge.copy(lineHeight = 26.sp, fontSize = 16.sp),
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                                    )
+                                }
+                            )
+
+                            // ── Chat history ──────────────────────────────────
+                            if (state.chatMessages.isNotEmpty() || state.isAiLoading) {
+                                Spacer(Modifier.height(24.dp))
+                                HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
+                                Spacer(Modifier.height(8.dp))
+                                Text(
+                                    "✦ AI Revisions",
+                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold, letterSpacing = 0.5.sp),
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                Spacer(Modifier.height(10.dp))
+                                state.chatMessages.forEach { msg ->
+                                    when (msg.role) {
+                                        "user"      -> CollabChatUserBubble(msg)
+                                        "assistant" -> CollabChatAiBubble()
+                                    }
+                                    Spacer(Modifier.height(6.dp))
+                                }
+                                if (state.isAiLoading) {
+                                    CollabChatLoadingBubble()
+                                    Spacer(Modifier.height(6.dp))
+                                }
+                            }
+
+                            state.chatError?.let { err ->
+                                Spacer(Modifier.height(8.dp))
+                                Text(err, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                            }
+
+                            Spacer(Modifier.height(100.dp))
+                        }
+
+                        // ── Selection replacement review (same position as NoteDetail) ──
+                        AnimatedVisibility(
+                            visible = state.selectionReplacement != null,
+                            enter   = expandVertically(expandFrom = Alignment.Bottom) + fadeIn(),
+                            exit    = shrinkVertically(shrinkTowards = Alignment.Bottom) + fadeOut()
+                        ) {
+                            CollabSelectionReviewBar(
+                                replacement = state.selectionReplacement ?: "",
+                                onApply     = {
+                                    val replacement = state.selectionReplacement ?: return@CollabSelectionReviewBar
+                                    coroutineScope.launch {
+                                        val fullHtml = richTextState.toHtml()
+                                        val newHtml  = spliceHtmlAtPlainRange(fullHtml, capturedRange.start, capturedRange.end, replacement)
+                                        pushUndo(undoStack, fullHtml)
+                                        redoStack.clear()
+                                        isInitializing = true
+                                        richTextState.setHtml(newHtml)
+                                        delay(100)
+                                        isInitializing = false
+                                        pushUndo(undoStack, richTextState.toHtml())
+                                        viewModel.onIntent(CollabNoteDetailIntent.EditedContentChanged(richTextState.toHtml()))
+                                    }
+                                    viewModel.onIntent(CollabNoteDetailIntent.ApplySelectionReplacement)
+                                },
+                                onDiscard   = { viewModel.onIntent(CollabNoteDetailIntent.DiscardSelectionReplacement) }
+                            )
+                        }
+
+                        // ── Heading picker sheet ──────────────────────────────
+                        AnimatedVisibility(
+                            visible = showHeadingSheet,
+                            enter   = slideInVertically(initialOffsetY = { it }),
+                            exit    = slideOutVertically(targetOffsetY = { it })
+                        ) {
+                            CollabHeadingSheet(richTextState = richTextState, onDismiss = { showHeadingSheet = false })
+                        }
+
+                        // ── Formatting toolbar ────────────────────────────────
+                        HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
+                        CollabFormattingToolbar(
+                            richTextState        = richTextState,
+                            canUndo              = undoStack.size > 1,
+                            canRedo              = redoStack.isNotEmpty(),
+                            onToggleHeadingSheet = { showHeadingSheet = !showHeadingSheet },
+                            onUndo = {
+                                if (undoStack.size > 1) {
+                                    val current = undoStack.removeLast()
+                                    redoStack.addFirst(current)
+                                    coroutineScope.launch {
+                                        isInitializing = true
+                                        richTextState.setHtml(undoStack.last())
+                                        delay(80)
+                                        isInitializing = false
+                                        viewModel.onIntent(CollabNoteDetailIntent.EditedContentChanged(richTextState.toHtml()))
+                                    }
+                                }
+                            },
+                            onRedo = {
+                                if (redoStack.isNotEmpty()) {
+                                    val next = redoStack.removeFirst()
+                                    undoStack.addLast(next)
+                                    coroutineScope.launch {
+                                        isInitializing = true
+                                        richTextState.setHtml(next)
+                                        delay(80)
+                                        isInitializing = false
+                                        viewModel.onIntent(CollabNoteDetailIntent.EditedContentChanged(richTextState.toHtml()))
+                                    }
+                                }
+                            }
+                        )
+
+                        // ── Unified AI input ──────────────────────────────────
+                        HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
+                        CollabUnifiedAiInputBar(
+                            input            = state.aiInput,
+                            selectionText    = state.selectionText,
+                            isLoading        = state.isAiLoading || state.isSelectionLoading,
+                            onInputChange    = { viewModel.onIntent(CollabNoteDetailIntent.AiInputChanged(it)) },
+                            onSend           = { viewModel.onIntent(CollabNoteDetailIntent.SendAiMessage) },
+                            onDismissSelection = { viewModel.onIntent(CollabNoteDetailIntent.DismissSelectionEdit) }
+                        )
+                    }
+                }
             }
-
-            HorizontalDivider(modifier = Modifier.padding(horizontal = 20.dp), thickness = 0.5.dp)
-
-            // Rich text editor
-            RichTextEditor(
-                state    = richTextState,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 4.dp),
-                colors   = RichTextEditorDefaults.richTextEditorColors(
-                    containerColor    = Color.Transparent,
-                    focusedIndicatorColor   = Color.Transparent,
-                    unfocusedIndicatorColor = Color.Transparent,
-                    cursorColor       = MaterialTheme.colorScheme.primary
-                ),
-                textStyle = MaterialTheme.typography.bodyLarge.copy(
-                    color = MaterialTheme.colorScheme.onBackground,
-                    lineHeight = 26.sp
-                )
-            )
         }
     }
 
     // ── Share code sheet ───────────────────────────────────────────────────────
     if (state.showShareCodeSheet) {
-        ShareCodeSheet(
+        CollabShareCodeSheet(
             shareCode = state.note?.shareCode ?: shareCode,
             onDismiss = { viewModel.onIntent(CollabNoteDetailIntent.DismissShareCode) }
         )
@@ -334,7 +431,6 @@ fun CollabNoteDetailScreen(
 @Composable
 private fun CollabDetailTopBar(
     shareCode: String,
-    participants: Int,
     isSaving: Boolean,
     hasChanges: Boolean,
     onBack: () -> Unit,
@@ -345,17 +441,24 @@ private fun CollabDetailTopBar(
     var showLeaveConfirm by remember { mutableStateOf(false) }
 
     TopAppBar(
-        title = { },
+        title = {},
         navigationIcon = {
             IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                Box(
+                    modifier = Modifier
+                        .size(34.dp)
+                        .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(10.dp)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(18.dp))
+                }
             }
         },
         actions = {
             // Share code chip
             Surface(
-                shape  = RoundedCornerShape(20.dp),
-                color  = MaterialTheme.colorScheme.primaryContainer,
+                shape    = RoundedCornerShape(20.dp),
+                color    = MaterialTheme.colorScheme.primaryContainer,
                 modifier = Modifier.clickable { onShareCode() }
             ) {
                 Row(
@@ -368,24 +471,31 @@ private fun CollabDetailTopBar(
                 }
             }
             Spacer(Modifier.width(4.dp))
-            // Save
-            AnimatedVisibility(visible = hasChanges) {
-                FilledTonalButton(
-                    onClick  = onSave,
-                    enabled  = !isSaving,
-                    modifier = Modifier.height(36.dp),
-                    colors   = ButtonDefaults.filledTonalButtonColors(containerColor = AppleYellow, contentColor = MaterialTheme.colorScheme.onPrimary)
+            // Save button — same style as NoteDetailScreen
+            AnimatedVisibility(visible = hasChanges, enter = fadeIn(), exit = fadeOut()) {
+                Surface(
+                    shape    = MaterialTheme.shapes.small,
+                    color    = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(end = 4.dp)
                 ) {
-                    if (isSaving) CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary)
-                    else Text("Save", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold))
+                    TextButton(
+                        onClick  = onSave,
+                        enabled  = !isSaving
+                    ) {
+                        if (isSaving) CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary)
+                        else Text("Save", color = MaterialTheme.colorScheme.onPrimary, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                    }
                 }
             }
             // Leave
             IconButton(onClick = { showLeaveConfirm = true }) {
-                Icon(Icons.Filled.ExitToApp, contentDescription = "Leave note", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                Icon(Icons.AutoMirrored.Filled.ExitToApp, contentDescription = "Leave note", tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         },
-        colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background)
+        colors = TopAppBarDefaults.topAppBarColors(
+            containerColor         = MaterialTheme.colorScheme.background,
+            scrolledContainerColor = MaterialTheme.colorScheme.background
+        )
     )
 
     if (showLeaveConfirm) {
@@ -405,185 +515,239 @@ private fun CollabDetailTopBar(
     }
 }
 
-// ── Formatting toolbar ────────────────────────────────────────────────────────
+// ── Selection review bar — exact copy of NoteDetailScreen's SelectionReviewBar ─
+
+@Composable
+private fun CollabSelectionReviewBar(replacement: String, onApply: () -> Unit, onDiscard: () -> Unit) {
+    HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
+    Surface(color = MaterialTheme.colorScheme.secondaryContainer) {
+        Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Filled.AutoFixHigh, contentDescription = null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.secondary)
+                Spacer(Modifier.width(6.dp))
+                Text("Review AI suggestion", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold), color = MaterialTheme.colorScheme.onSecondaryContainer, modifier = Modifier.weight(1f))
+            }
+            Spacer(Modifier.height(8.dp))
+            Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.surface) {
+                Text(text = replacement, style = MaterialTheme.typography.bodySmall.copy(lineHeight = 20.sp), color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp), maxLines = 6)
+            }
+            Spacer(Modifier.height(8.dp))
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                TextButton(onClick = onDiscard) {
+                    Text("Discard", color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.7f))
+                }
+                Spacer(Modifier.width(8.dp))
+                Button(onClick = onApply, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)) {
+                    Text("Apply", fontWeight = FontWeight.SemiBold)
+                }
+            }
+        }
+    }
+}
+
+// ── Formatting toolbar — exact copy of NoteDetailScreen's FormattingToolbar ───
 
 @Composable
 private fun CollabFormattingToolbar(
     richTextState: RichTextState,
     canUndo: Boolean,
     canRedo: Boolean,
+    onToggleHeadingSheet: () -> Unit,
     onUndo: () -> Unit,
     onRedo: () -> Unit
 ) {
-    Surface(
-        color       = MaterialTheme.colorScheme.surface,
-        tonalElevation = 2.dp
+    val isBold          = richTextState.currentSpanStyle.fontWeight == FontWeight.Bold
+    val isItalic        = richTextState.currentSpanStyle.fontStyle == FontStyle.Italic
+    val isUnderline     = richTextState.currentSpanStyle.textDecoration?.contains(TextDecoration.Underline) == true
+    val isStrikethrough = richTextState.currentSpanStyle.textDecoration?.contains(TextDecoration.LineThrough) == true
+    val isBulletList    = richTextState.isUnorderedList
+    val isOrderedList   = richTextState.isOrderedList
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surface)
+            .horizontalScroll(rememberScrollState())
+            .imePadding()
+            .padding(horizontal = 4.dp, vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState())
-                .padding(horizontal = 8.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            // Undo / Redo
-            IconButton(onClick = onUndo, enabled = canUndo, modifier = Modifier.size(36.dp)) {
-                Icon(Icons.AutoMirrored.Filled.Undo, contentDescription = "Undo", modifier = Modifier.size(18.dp))
-            }
-            IconButton(onClick = onRedo, enabled = canRedo, modifier = Modifier.size(36.dp)) {
-                Icon(Icons.AutoMirrored.Filled.Redo, contentDescription = "Redo", modifier = Modifier.size(18.dp))
-            }
-            VerticalDivider(modifier = Modifier.height(20.dp).padding(horizontal = 4.dp))
-            // Bold
-            FormatButton(
-                active  = richTextState.currentSpanStyle.fontWeight == FontWeight.Bold,
-                onClick = { richTextState.toggleSpanStyle(androidx.compose.ui.text.SpanStyle(fontWeight = FontWeight.Bold)) }
-            ) { Text("B", style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)) }
-            // Italic
-            FormatButton(
-                active  = richTextState.currentSpanStyle.fontStyle == FontStyle.Italic,
-                onClick = { richTextState.toggleSpanStyle(androidx.compose.ui.text.SpanStyle(fontStyle = FontStyle.Italic)) }
-            ) { Text("I", style = MaterialTheme.typography.labelLarge.copy(fontStyle = FontStyle.Italic)) }
-            // Underline
-            FormatButton(
-                active  = richTextState.currentSpanStyle.textDecoration?.contains(TextDecoration.Underline) == true,
-                onClick = { richTextState.toggleSpanStyle(androidx.compose.ui.text.SpanStyle(textDecoration = TextDecoration.Underline)) }
-            ) { Text("U", style = MaterialTheme.typography.labelLarge.copy(textDecoration = TextDecoration.Underline)) }
-            // Strikethrough
-            FormatButton(
-                active  = richTextState.currentSpanStyle.textDecoration?.contains(TextDecoration.LineThrough) == true,
-                onClick = { richTextState.toggleSpanStyle(androidx.compose.ui.text.SpanStyle(textDecoration = TextDecoration.LineThrough)) }
-            ) { Text("S", style = MaterialTheme.typography.labelLarge.copy(textDecoration = TextDecoration.LineThrough)) }
-            VerticalDivider(modifier = Modifier.height(20.dp).padding(horizontal = 4.dp))
-            // Bullet list
-            FormatButton(
-                active  = richTextState.isUnorderedList,
-                onClick = { richTextState.toggleUnorderedList() }
-            ) { Icon(Icons.Filled.FormatListBulleted, contentDescription = "Bullet list", modifier = Modifier.size(18.dp)) }
-            // Numbered list
-            FormatButton(
-                active  = richTextState.isOrderedList,
-                onClick = { richTextState.toggleOrderedList() }
-            ) { Icon(Icons.Filled.FormatListNumbered, contentDescription = "Numbered list", modifier = Modifier.size(18.dp)) }
+        IconButton(onClick = onUndo, enabled = canUndo, modifier = Modifier.size(40.dp)) {
+            Icon(Icons.AutoMirrored.Filled.Undo, contentDescription = "Undo", tint = if (canUndo) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f), modifier = Modifier.size(20.dp))
+        }
+        IconButton(onClick = onRedo, enabled = canRedo, modifier = Modifier.size(40.dp)) {
+            Icon(Icons.AutoMirrored.Filled.Redo, contentDescription = "Redo", tint = if (canRedo) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f), modifier = Modifier.size(20.dp))
+        }
+        VerticalDivider(modifier = Modifier.height(22.dp).padding(horizontal = 2.dp), color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
+        TextButton(onClick = onToggleHeadingSheet, modifier = Modifier.height(40.dp), contentPadding = PaddingValues(horizontal = 12.dp)) {
+            Text("Aa", fontWeight = FontWeight.SemiBold, fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurface)
+        }
+        VerticalDivider(modifier = Modifier.height(22.dp).padding(horizontal = 2.dp), color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
+        CollabFormatIconButton(Icons.Filled.FormatBold, isBold)          { richTextState.toggleSpanStyle(SpanStyle(fontWeight = FontWeight.Bold)) }
+        CollabFormatIconButton(Icons.Filled.FormatItalic, isItalic)      { richTextState.toggleSpanStyle(SpanStyle(fontStyle = FontStyle.Italic)) }
+        CollabFormatIconButton(Icons.Filled.FormatUnderlined, isUnderline) { richTextState.toggleSpanStyle(SpanStyle(textDecoration = TextDecoration.Underline)) }
+        CollabFormatIconButton(Icons.Filled.FormatStrikethrough, isStrikethrough) { richTextState.toggleSpanStyle(SpanStyle(textDecoration = TextDecoration.LineThrough)) }
+        VerticalDivider(modifier = Modifier.height(22.dp).padding(horizontal = 2.dp), color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
+        CollabFormatIconButton(Icons.AutoMirrored.Filled.FormatListBulleted, isBulletList)  { richTextState.toggleUnorderedList() }
+        CollabFormatIconButton(Icons.Filled.FormatListNumbered, isOrderedList) { richTextState.toggleOrderedList() }
+    }
+}
+
+@Composable
+private fun CollabFormatIconButton(icon: ImageVector, isActive: Boolean, onClick: () -> Unit) {
+    IconButton(
+        onClick  = onClick,
+        modifier = Modifier
+            .size(40.dp)
+            .background(if (isActive) MaterialTheme.colorScheme.primaryContainer else Color.Transparent, RoundedCornerShape(8.dp))
+    ) {
+        Icon(icon, contentDescription = null, tint = if (isActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(20.dp))
+    }
+}
+
+// ── Heading sheet — exact copy of NoteDetailScreen's HeadingSheet ─────────────
+
+@Composable
+private fun CollabHeadingSheet(richTextState: RichTextState, onDismiss: () -> Unit) {
+    Surface(color = MaterialTheme.colorScheme.surface, shadowElevation = 12.dp) {
+        Column(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
+            Box(modifier = Modifier.width(36.dp).height(4.dp).background(MaterialTheme.colorScheme.outline.copy(alpha = 0.4f), RoundedCornerShape(2.dp)).align(Alignment.CenterHorizontally))
+            Spacer(Modifier.height(8.dp))
+            CollabHeadingOption("Title",      "Large title",     26.sp, FontWeight.Bold)      { richTextState.toggleSpanStyle(SpanStyle(fontSize = 26.sp, fontWeight = FontWeight.Bold)); onDismiss() }
+            CollabHeadingOption("Heading",    "Section heading", 22.sp, FontWeight.Bold)      { richTextState.toggleSpanStyle(SpanStyle(fontSize = 22.sp, fontWeight = FontWeight.SemiBold)); onDismiss() }
+            CollabHeadingOption("Subheading", "Smaller heading", 18.sp, FontWeight.SemiBold)  { richTextState.toggleSpanStyle(SpanStyle(fontSize = 18.sp, fontWeight = FontWeight.Medium)); onDismiss() }
+            CollabHeadingOption("Body",       "Regular text",    16.sp, FontWeight.Normal)    { richTextState.toggleSpanStyle(SpanStyle(fontSize = 16.sp, fontWeight = FontWeight.Normal)); onDismiss() }
+            Spacer(Modifier.height(8.dp))
         }
     }
 }
 
 @Composable
-private fun FormatButton(active: Boolean, onClick: () -> Unit, content: @Composable () -> Unit) {
-    Surface(
-        shape    = RoundedCornerShape(8.dp),
-        color    = if (active) AppleYellow.copy(alpha = 0.2f) else Color.Transparent,
-        modifier = Modifier.size(36.dp).clickable { onClick() },
-        contentColor = if (active) AppleYellow else MaterialTheme.colorScheme.onSurfaceVariant
-    ) {
-        Box(contentAlignment = Alignment.Center) { content() }
+private fun CollabHeadingOption(label: String, description: String, fontSize: TextUnit, fontWeight: FontWeight, onClick: () -> Unit) {
+    Row(modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 20.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+        Text(label, fontSize = fontSize, fontWeight = fontWeight, color = MaterialTheme.colorScheme.onSurface)
+        Text(description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
-// ── AI input bar ──────────────────────────────────────────────────────────────
+// ── Unified AI input bar — exact copy of NoteDetailScreen's UnifiedAiInputBar ─
 
 @Composable
-private fun CollabAiInputBar(
-    aiInput: String,
-    isLoading: Boolean,
+private fun CollabUnifiedAiInputBar(
+    input: String,
     selectionText: String,
-    onValueChange: (String) -> Unit,
+    isLoading: Boolean,
+    onInputChange: (String) -> Unit,
     onSend: () -> Unit,
-    onDismissSelect: () -> Unit
+    onDismissSelection: () -> Unit
 ) {
-    Surface(
-        color       = MaterialTheme.colorScheme.surface,
-        tonalElevation = 4.dp
+    val hasSelection = selectionText.isNotEmpty()
+    val placeholder  = when {
+        isLoading    -> "AI is working…"
+        hasSelection -> "Refine: \"${selectionText.take(40)}${if (selectionText.length > 40) "…" else ""}\""
+        else         -> "✦ Ask AI to modify…"
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(if (hasSelection) MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f) else MaterialTheme.colorScheme.background)
+            .imePadding()
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            if (selectionText.isNotEmpty()) {
-                Surface(
-                    shape = RoundedCornerShape(6.dp),
-                    color = AppleYellow.copy(alpha = 0.15f),
-                    modifier = Modifier.padding(end = 8.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(Icons.Filled.AutoFixHigh, contentDescription = null, modifier = Modifier.size(14.dp), tint = AppleYellow)
-                        Spacer(Modifier.width(4.dp))
-                        Text("Editing selection", style = MaterialTheme.typography.labelSmall, color = AppleYellow)
-                        Spacer(Modifier.width(4.dp))
-                        Icon(Icons.Filled.Close, contentDescription = "Dismiss", modifier = Modifier.size(14.dp).clickable { onDismissSelect() }, tint = AppleYellow)
-                    }
+        if (hasSelection) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(Icons.Filled.AutoFixHigh, null, modifier = Modifier.size(12.dp), tint = MaterialTheme.colorScheme.secondary)
+                Spacer(Modifier.width(4.dp))
+                Text("Selection mode", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)
+                Spacer(Modifier.weight(1f))
+                IconButton(onClick = onDismissSelection, modifier = Modifier.size(24.dp)) {
+                    Icon(Icons.Filled.Close, "Clear selection", modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.secondary)
                 }
             }
-            Surface(
-                shape    = RoundedCornerShape(20.dp),
-                color    = MaterialTheme.colorScheme.surfaceVariant,
-                modifier = Modifier.weight(1f)
-            ) {
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Surface(shape = RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.surfaceVariant, modifier = Modifier.weight(1f)) {
                 BasicTextField(
-                    value         = aiInput,
-                    onValueChange = onValueChange,
+                    value         = input,
+                    onValueChange = onInputChange,
+                    enabled       = !isLoading,
                     textStyle     = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onSurface),
                     cursorBrush   = SolidColor(MaterialTheme.colorScheme.primary),
-                    modifier      = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                    singleLine    = false,
+                    maxLines      = 4,
+                    modifier      = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
                     decorationBox = { inner ->
-                        if (aiInput.isEmpty()) Text(
-                            if (selectionText.isNotEmpty()) "Instruction for selection…" else "Ask AI to edit this note…",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                        if (input.isEmpty()) Text(placeholder, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
                         inner()
                     }
                 )
             }
             Spacer(Modifier.width(8.dp))
-            Box(
-                modifier = Modifier
-                    .size(40.dp)
-                    .background(if (aiInput.isNotBlank() && !isLoading) AppleYellow else MaterialTheme.colorScheme.surfaceVariant, CircleShape)
-                    .clickable(enabled = aiInput.isNotBlank() && !isLoading) { onSend() },
-                contentAlignment = Alignment.Center
+            val sendReady = input.isNotBlank() && !isLoading
+            IconButton(
+                onClick  = onSend,
+                enabled  = sendReady,
+                modifier = Modifier.size(44.dp).background(if (sendReady) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(50))
             ) {
-                if (isLoading) CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                else Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send", modifier = Modifier.size(18.dp), tint = if (aiInput.isNotBlank()) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant)
+                if (isLoading) CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f))
+                else Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send", tint = if (sendReady) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f), modifier = Modifier.size(20.dp))
             }
         }
     }
 }
 
-// ── Selection replacement banner ──────────────────────────────────────────────
+// ── Chat bubbles — exact copy of NoteDetailScreen ─────────────────────────────
 
 @Composable
-private fun SelectionReplacementBanner(
-    replacement: String,
-    onApply: () -> Unit,
-    onDiscard: () -> Unit
-) {
-    Surface(color = MaterialTheme.colorScheme.secondaryContainer) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text("AI suggestion", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.7f))
-                Text(replacement.take(80) + if (replacement.length > 80) "…" else "", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSecondaryContainer, maxLines = 2)
-            }
-            Spacer(Modifier.width(8.dp))
-            TextButton(onClick = onDiscard) { Text("Discard") }
-            Button(onClick = onApply, colors = ButtonDefaults.buttonColors(containerColor = AppleYellow, contentColor = MaterialTheme.colorScheme.onPrimary)) { Text("Apply") }
+private fun CollabChatUserBubble(msg: Message) {
+    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+        Surface(shape = RoundedCornerShape(topStart = 16.dp, topEnd = 4.dp, bottomStart = 16.dp, bottomEnd = 16.dp), color = MaterialTheme.colorScheme.surfaceVariant, modifier = Modifier.widthIn(max = 280.dp)) {
+            Text(text = msg.message, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp))
         }
     }
 }
 
-// ── Share code sheet ──────────────────────────────────────────────────────────
+@Composable
+private fun CollabChatAiBubble() {
+    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Start, verticalAlignment = Alignment.CenterVertically) {
+        Surface(shape = RoundedCornerShape(topStart = 4.dp, topEnd = 16.dp, bottomStart = 16.dp, bottomEnd = 16.dp), color = MaterialTheme.colorScheme.primaryContainer, modifier = Modifier.widthIn(max = 280.dp)) {
+            Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("✦", fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
+                    Spacer(Modifier.width(6.dp))
+                    Text("Suggestion ready", style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium), color = MaterialTheme.colorScheme.onPrimaryContainer)
+                }
+                Spacer(Modifier.height(2.dp))
+                Text("Review and edit above, then tap Save to keep it.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f))
+            }
+        }
+    }
+}
 
 @Composable
-private fun ShareCodeSheet(shareCode: String, onDismiss: () -> Unit) {
+private fun CollabChatLoadingBubble() {
+    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Start, verticalAlignment = Alignment.CenterVertically) {
+        Surface(shape = RoundedCornerShape(topStart = 4.dp, topEnd = 16.dp, bottomStart = 16.dp, bottomEnd = 16.dp), color = MaterialTheme.colorScheme.primaryContainer) {
+            Row(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.primary)
+                Spacer(Modifier.width(8.dp))
+                Text("AI is thinking…", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onPrimaryContainer)
+            }
+        }
+    }
+}
+
+// ── Share code sheet ───────────────────────────────────────────────────────────
+
+@Suppress("DEPRECATION")
+@Composable
+private fun CollabShareCodeSheet(shareCode: String, onDismiss: () -> Unit) {
     val clipboard = LocalClipboardManager.current
     var copied by remember { mutableStateOf(false) }
 
@@ -596,24 +760,12 @@ private fun ShareCodeSheet(shareCode: String, onDismiss: () -> Unit) {
             Spacer(Modifier.height(8.dp))
             Text("Anyone who enters this code can view and edit this note.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
             Spacer(Modifier.height(24.dp))
-            // Big code display
-            Surface(
-                shape = RoundedCornerShape(20.dp),
-                color = AppleYellow.copy(alpha = 0.12f)
-            ) {
-                Text(
-                    shareCode,
-                    style    = MaterialTheme.typography.displaySmall.copy(fontFamily = FontFamily.Monospace, fontWeight = FontWeight.ExtraBold, letterSpacing = 8.sp),
-                    color    = MaterialTheme.colorScheme.onBackground,
-                    modifier = Modifier.padding(horizontal = 32.dp, vertical = 16.dp)
-                )
+            Surface(shape = RoundedCornerShape(20.dp), color = AppleYellow.copy(alpha = 0.12f)) {
+                Text(shareCode, style = MaterialTheme.typography.displaySmall.copy(fontFamily = FontFamily.Monospace, fontWeight = FontWeight.ExtraBold, letterSpacing = 8.sp), color = MaterialTheme.colorScheme.onBackground, modifier = Modifier.padding(horizontal = 32.dp, vertical = 16.dp))
             }
             Spacer(Modifier.height(20.dp))
             Button(
-                onClick = {
-                    clipboard.setText(AnnotatedString(shareCode))
-                    copied = true
-                },
+                onClick  = { clipboard.setText(AnnotatedString(shareCode)); copied = true },
                 modifier = Modifier.fillMaxWidth().height(52.dp),
                 colors   = ButtonDefaults.buttonColors(containerColor = if (copied) MaterialTheme.colorScheme.secondary else AppleYellow, contentColor = MaterialTheme.colorScheme.onPrimary)
             ) {
@@ -625,7 +777,12 @@ private fun ShareCodeSheet(shareCode: String, onDismiss: () -> Unit) {
     }
 }
 
-// ── HTML splice helper (reused from NoteDetailScreen) ─────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+private fun loadIntoEditor(richTextState: RichTextState, content: String) {
+    if (content.trimStart().startsWith("<")) richTextState.setHtml(content)
+    else richTextState.setMarkdown(content)
+}
 
 private fun spliceHtmlAtPlainRange(html: String, start: Int, end: Int, replacement: String): String {
     var plain = 0; var htmlIdx = 0

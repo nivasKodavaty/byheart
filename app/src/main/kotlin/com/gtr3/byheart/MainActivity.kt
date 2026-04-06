@@ -13,20 +13,28 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalView
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.core.view.WindowCompat
+import androidx.navigation.NavHostController
+import androidx.navigation.compose.rememberNavController
+import com.gtr3.byheart.core.auth.AuthEventBus
 import com.gtr3.byheart.presentation.navigation.NavGraph
+import com.gtr3.byheart.presentation.navigation.Screen
 import com.gtr3.byheart.presentation.theme.ByHeartTheme
 import dagger.hilt.android.AndroidEntryPoint
+import javax.inject.Inject
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
 
     private val viewModel: MainViewModel by viewModels()
+
+    @Inject lateinit var authEventBus: AuthEventBus
 
     override fun onCreate(savedInstanceState: Bundle?) {
         val splashScreen = installSplashScreen()
@@ -43,10 +51,9 @@ class MainActivity : ComponentActivity() {
             ByHeartTheme {
                 val isDark = isSystemInDarkTheme()
                 val view = LocalView.current
+                val navController: NavHostController = rememberNavController()
 
                 // ── Single place: status bar & nav bar icon colours ────────────
-                // Light mode  → dark icons on light bg
-                // Dark mode   → light icons on dark bg
                 SideEffect {
                     val window = (view.context as Activity).window
                     WindowCompat.getInsetsController(window, view).apply {
@@ -55,11 +62,16 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
+                // ── Session expiry: force logout to Login on 401 ───────────────
+                LaunchedEffect(Unit) {
+                    authEventBus.unauthorizedEvent.collect {
+                        navController.navigate(Screen.Login.route) {
+                            popUpTo(0) { inclusive = true }
+                        }
+                    }
+                }
+
                 // ── Single place: system-bar padding + IME padding ─────────────
-                // windowInsetsPadding(systemBars) reserves space for the status
-                // bar (top) and nav bar (bottom) once, for the whole app.
-                // imePadding() sits below that and grows when the software
-                // keyboard appears, pushing the focused bottom-bar up.
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -69,6 +81,7 @@ class MainActivity : ComponentActivity() {
                     val startDest = viewModel.startDestination
                     if (startDest != null) {
                         NavGraph(
+                            navController    = navController,
                             startDestination = startDest,
                             pendingNoteId    = pendingNoteId
                         )

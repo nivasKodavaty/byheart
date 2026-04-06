@@ -17,7 +17,7 @@ android {
         versionName = "1.0"
 
         // Base URL — machine's LAN IP for testing on a physical device
-        buildConfigField("String", "BASE_URL", "\"http://192.168.29.67:8080/\"")
+        buildConfigField("String", "BASE_URL", "\"http://10.0.2.2:8080/\"")
     }
 
     buildTypes {

@@ -9,7 +9,8 @@ data class NotesListState(
     val folders: List<String> = emptyList(),
     val selectedFolder: String? = null,   // null = All Notes
     val searchQuery: String = "",
-    val error: String? = null
+    val error: String? = null,
+    val collapsedFolders: Set<String> = emptySet()
 ) {
     // Apply folder filter first, then search
     val filtered: List<Note>
@@ -38,6 +39,7 @@ sealed class NotesListIntent {
     data class PinNote(val id: Long) : NotesListIntent()
     data class SearchChanged(val query: String) : NotesListIntent()
     data class SelectFolder(val folder: String?) : NotesListIntent()
+    data class ToggleFolderCollapse(val folder: String) : NotesListIntent()
     data object Refresh : NotesListIntent()
     data object CreateNote : NotesListIntent()
 }

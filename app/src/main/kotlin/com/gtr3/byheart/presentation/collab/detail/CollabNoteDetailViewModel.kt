@@ -97,14 +97,15 @@ class CollabNoteDetailViewModel @Inject constructor(
                     if (fresh.version != current?.version) {
                         _state.update {
                             it.copy(
-                                note          = fresh,
-                                editedTitle   = fresh.title,
-                                editedContent = fresh.content ?: "",
-                                chatMessages  = fresh.messages,
+                                note             = fresh,
+                                editedTitle      = fresh.title,
+                                editedContent    = fresh.content ?: "",
+                                chatMessages     = fresh.messages,
+                                // bumping aiContentVersion is enough — the screen's
+                                // LaunchedEffect(aiContentVersion) loads editedContent into editor
                                 aiContentVersion = it.aiContentVersion + 1
                             )
                         }
-                        _effect.send(CollabNoteDetailEffect.ReloadEditor)
                     }
                 }
                 else -> { /* silently ignore poll failures */ }
@@ -162,15 +163,21 @@ class CollabNoteDetailViewModel @Inject constructor(
             _state.update { it.copy(isAiLoading = true, aiInput = "", chatError = null) }
             when (val result = collabRepository.chatOnCollabNote(note.shareCode, message)) {
                 is Result.Success -> {
-                    _state.update {
-                        it.copy(
-                            isAiLoading      = false,
-                            note             = result.data,
-                            chatMessages     = result.data.messages,
-                            aiContentVersion = it.aiContentVersion + 1
+                    // Chat does NOT update note.content server-side — the AI reply comes back
+                    // as the last assistant message. We must push it into editedContent so the
+                    // screen's LaunchedEffect(aiContentVersion) can load it into the editor.
+                    val aiContent = result.data.messages.lastOrNull { it.role == "assistant" }?.message
+                    _state.update { current ->
+                        current.copy(
+                            isAiLoading       = false,
+                            note              = result.data,
+                            chatMessages      = result.data.messages,
+                            editedContent     = aiContent ?: current.editedContent,
+                            hasUnsavedChanges = aiContent != null,
+                            aiContentVersion  = if (aiContent != null) current.aiContentVersion + 1
+                                                else current.aiContentVersion
                         )
                     }
-                    _effect.send(CollabNoteDetailEffect.ReloadEditor)
                 }
                 is Result.Error -> _state.update { it.copy(isAiLoading = false, chatError = result.message) }
                 else -> _state.update { it.copy(isAiLoading = false) }

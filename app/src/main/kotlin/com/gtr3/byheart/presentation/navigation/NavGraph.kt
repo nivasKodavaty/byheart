@@ -14,6 +14,7 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -24,6 +25,7 @@ import com.gtr3.byheart.presentation.auth.RegisterScreen
 import com.gtr3.byheart.presentation.collab.detail.CollabNoteDetailScreen
 import com.gtr3.byheart.presentation.main.MainScreen
 import com.gtr3.byheart.presentation.notes.detail.NoteDetailScreen
+import com.gtr3.byheart.presentation.settings.SettingsScreen
 
 // ── Durations ─────────────────────────────────────────────────────────────────
 private const val SLIDE_MS  = 320
@@ -57,10 +59,10 @@ private val detailExit = slideOutVertically(
 
 @Composable
 fun NavGraph(
-    startDestination: String = Screen.Login.route,
-    pendingNoteId: Long?     = null
+    navController: NavHostController = rememberNavController(),
+    startDestination: String         = Screen.Login.route,
+    pendingNoteId: Long?             = null
 ) {
-    val navController = rememberNavController()
 
     LaunchedEffect(pendingNoteId) {
         if (pendingNoteId != null && startDestination == Screen.Main.route) {
@@ -124,7 +126,26 @@ fun NavGraph(
             MainScreen(
                 onNavigateToNoteDetail   = { id -> navController.navigate(Screen.NoteDetail.route(id)) },
                 onNavigateToCreateNote   = { navController.navigate(Screen.CreateNote.route) },
-                onNavigateToCollabDetail = { shareCode -> navController.navigate(Screen.CollabDetail.route(shareCode)) }
+                onNavigateToCollabDetail = { shareCode -> navController.navigate(Screen.CollabDetail.route(shareCode)) },
+                onNavigateToSettings     = { navController.navigate(Screen.Settings.route) }
+            )
+        }
+
+        // ── Settings ──────────────────────────────────────────────────────────
+        composable(
+            route               = Screen.Settings.route,
+            enterTransition     = { detailEnter },
+            exitTransition      = { detailExit },
+            popEnterTransition  = { listEnter },
+            popExitTransition   = { detailExit }
+        ) {
+            SettingsScreen(
+                onNavigateBack = { navController.popBackStack() },
+                onLogout       = {
+                    navController.navigate(Screen.Login.route) {
+                        popUpTo(0) { inclusive = true }
+                    }
+                }
             )
         }
 

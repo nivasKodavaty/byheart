@@ -4,6 +4,7 @@ package com.gtr3.byheart.presentation.notes.list
 
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -17,8 +18,10 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Notes
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.PushPin
@@ -29,6 +32,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -48,6 +52,7 @@ import java.time.format.DateTimeFormatter
 fun NotesListScreen(
     onNavigateToDetail: (Long) -> Unit,
     onNavigateToCreate: () -> Unit,
+    onNavigateToSettings: () -> Unit = {},
     viewModel: NotesListViewModel = hiltViewModel()
 ) {
     val state      by viewModel.state.collectAsStateWithLifecycle()
@@ -72,10 +77,14 @@ fun NotesListScreen(
         drawerState   = drawerState,
         drawerContent = {
             NotesDrawer(
-                state           = state,
-                onSelectFolder  = { folder ->
+                state             = state,
+                onSelectFolder    = { folder ->
                     viewModel.onIntent(NotesListIntent.SelectFolder(folder))
                     scope.launch { drawerState.close() }
+                },
+                onNavigateToSettings = {
+                    scope.launch { drawerState.close() }
+                    onNavigateToSettings()
                 }
             )
         }
@@ -159,11 +168,12 @@ fun NotesListScreen(
                     state.isLoading && state.notes.isEmpty() -> LoadingView()
                     state.filtered.isEmpty()                 -> EmptyView(state.searchQuery)
                     else -> NotesSectionsList(
-                        state     = state,
-                        listState = listState,
-                        onOpen    = { viewModel.onIntent(NotesListIntent.OpenNote(it)) },
-                        onPin     = { viewModel.onIntent(NotesListIntent.PinNote(it)) },
-                        onDelete  = { viewModel.onIntent(NotesListIntent.DeleteNote(it)) }
+                        state          = state,
+                        listState      = listState,
+                        onOpen         = { viewModel.onIntent(NotesListIntent.OpenNote(it)) },
+                        onPin          = { viewModel.onIntent(NotesListIntent.PinNote(it)) },
+                        onDelete       = { viewModel.onIntent(NotesListIntent.DeleteNote(it)) },
+                        onToggleFolder = { viewModel.onIntent(NotesListIntent.ToggleFolderCollapse(it)) }
                     )
                 }
             }
@@ -213,7 +223,11 @@ private fun EmptyView(query: String) {
 // ─── Drawer ───────────────────────────────────────────────────────────────────
 
 @Composable
-private fun NotesDrawer(state: NotesListState, onSelectFolder: (String?) -> Unit) {
+private fun NotesDrawer(
+    state: NotesListState,
+    onSelectFolder: (String?) -> Unit,
+    onNavigateToSettings: () -> Unit
+) {
     ModalDrawerSheet(
         drawerContainerColor = MaterialTheme.colorScheme.surface,
         modifier             = Modifier.width(288.dp)
@@ -292,11 +306,18 @@ private fun NotesDrawer(state: NotesListState, onSelectFolder: (String?) -> Unit
             modifier = Modifier.padding(horizontal = 16.dp),
             color    = MaterialTheme.colorScheme.outlineVariant
         )
-        Text(
-            "${state.allNotesCount} note${if (state.allNotesCount != 1) "s" else ""}",
-            style    = MaterialTheme.typography.bodySmall,
-            color    = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-            modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp)
+        DrawerItem(
+            icon  = {
+                Icon(
+                    Icons.Default.Settings, null,
+                    tint     = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(18.dp)
+                )
+            },
+            label    = "Settings",
+            count    = 0,
+            selected = false,
+            onClick  = onNavigateToSettings
         )
     }
 }
@@ -359,7 +380,8 @@ private fun NotesSectionsList(
     listState: androidx.compose.foundation.lazy.LazyListState,
     onOpen: (Long) -> Unit,
     onPin: (Long) -> Unit,
-    onDelete: (Long) -> Unit
+    onDelete: (Long) -> Unit,
+    onToggleFolder: (String) -> Unit
 ) {
     LazyColumn(
         state           = listState,
@@ -402,13 +424,22 @@ private fun NotesSectionsList(
             state.folders.forEach { folder ->
                 val folderNotes = state.notesInFolder(folder)
                 if (folderNotes.isNotEmpty()) {
-                    item(key = "header_$folder") { SectionHeader(folder) }
-                    items(folderNotes, key = { "folder_${folder}_${it.id}" }) { note ->
-                        SwipeableNoteCard(note, onOpen, onPin, onDelete,
-                            modifier = Modifier.animateItem(
-                                fadeInSpec  = spring(stiffness = Spring.StiffnessMediumLow),
-                                fadeOutSpec = spring(stiffness = Spring.StiffnessMediumLow)
-                            ))
+                    val isCollapsed = folder in state.collapsedFolders
+                    item(key = "header_$folder") {
+                        SectionHeader(
+                            title       = folder,
+                            isCollapsed = isCollapsed,
+                            onToggle    = { onToggleFolder(folder) }
+                        )
+                    }
+                    if (!isCollapsed) {
+                        items(folderNotes, key = { "folder_${folder}_${it.id}" }) { note ->
+                            SwipeableNoteCard(note, onOpen, onPin, onDelete,
+                                modifier = Modifier.animateItem(
+                                    fadeInSpec  = spring(stiffness = Spring.StiffnessMediumLow),
+                                    fadeOutSpec = spring(stiffness = Spring.StiffnessMediumLow)
+                                ))
+                        }
                     }
                 }
             }
@@ -429,10 +460,20 @@ private fun NotesSectionsList(
 }
 
 @Composable
-private fun SectionHeader(title: String) {
+private fun SectionHeader(
+    title: String,
+    isCollapsed: Boolean = false,
+    onToggle: (() -> Unit)? = null
+) {
+    val chevronAngle by animateFloatAsState(
+        targetValue   = if (isCollapsed) -90f else 0f,
+        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+        label         = "chevron_rotate"
+    )
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .then(if (onToggle != null) Modifier.clickable(onClick = onToggle) else Modifier)
             .padding(start = 4.dp, top = 12.dp, bottom = 4.dp, end = 4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -447,13 +488,23 @@ private fun SectionHeader(title: String) {
         )
         Spacer(Modifier.width(8.dp))
         Text(
-            text  = title.uppercase(),
-            style = MaterialTheme.typography.labelSmall.copy(
+            text     = title.uppercase(),
+            style    = MaterialTheme.typography.labelSmall.copy(
                 fontWeight    = FontWeight.Bold,
                 letterSpacing = 1.2.sp
             ),
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            color    = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f)
         )
+        if (onToggle != null) {
+            Icon(
+                imageVector        = Icons.Default.ExpandMore,
+                contentDescription = if (isCollapsed) "Expand" else "Collapse",
+                tint               = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                modifier           = Modifier.size(18.dp).rotate(chevronAngle)
+            )
+            Spacer(Modifier.width(4.dp))
+        }
     }
 }
 

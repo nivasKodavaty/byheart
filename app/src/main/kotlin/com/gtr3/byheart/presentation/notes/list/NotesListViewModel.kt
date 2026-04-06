@@ -47,6 +47,13 @@ class NotesListViewModel @Inject constructor(
             is NotesListIntent.PinNote        -> pinNote(intent.id)
             is NotesListIntent.SearchChanged  -> _state.update { it.copy(searchQuery = intent.query) }
             is NotesListIntent.SelectFolder   -> _state.update { it.copy(selectedFolder = intent.folder, searchQuery = "") }
+            is NotesListIntent.ToggleFolderCollapse -> _state.update { s ->
+                val newCollapsed = if (intent.folder in s.collapsedFolders)
+                    s.collapsedFolders - intent.folder
+                else
+                    s.collapsedFolders + intent.folder
+                s.copy(collapsedFolders = newCollapsed)
+            }
             NotesListIntent.Refresh           -> refresh()
             is NotesListIntent.OpenNote       -> viewModelScope.launch {
                 _effect.send(NotesListEffect.NavigateToDetail(intent.id))
