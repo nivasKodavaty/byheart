@@ -5,6 +5,7 @@ import com.gtr3.byheart.data.local.datastore.AuthDataStore
 import com.gtr3.byheart.data.remote.api.AuthApi
 import com.gtr3.byheart.data.remote.dto.LoginRequest
 import com.gtr3.byheart.data.remote.dto.RegisterRequest
+import com.gtr3.byheart.data.remote.dto.GoogleSignInRequestDto
 import com.gtr3.byheart.data.remote.dto.UpdateProfileRequestDto
 import com.gtr3.byheart.domain.model.AuthResult
 import com.gtr3.byheart.domain.model.UserProfile
@@ -34,6 +35,12 @@ class AuthRepositoryImpl @Inject constructor(
     override suspend fun getToken(): String? = dataStore.getToken()
 
     override suspend fun clearToken() = dataStore.clearToken()
+
+    override suspend fun loginWithGoogle(idToken: String): Result<AuthResult> =
+        runCatching {
+            val response = api.googleSignIn(GoogleSignInRequestDto(idToken))
+            Result.Success(AuthResult(response.token, response.refreshToken, response.email))
+        }.getOrElse { Result.Error(it.message ?: "Google sign-in failed") }
 
     override suspend fun getProfile(): Result<UserProfile> =
         runCatching {

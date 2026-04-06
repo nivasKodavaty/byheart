@@ -1,5 +1,11 @@
 package com.gtr3.byheart.domain.model
 
+data class CollabParticipant(
+    val email: String,
+    val displayName: String?,
+    val joinedAt: String
+)
+
 data class CollabNote(
     val id: Long,
     val shareCode: String,

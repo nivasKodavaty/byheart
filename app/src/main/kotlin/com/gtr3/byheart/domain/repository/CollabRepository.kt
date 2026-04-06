@@ -2,6 +2,7 @@ package com.gtr3.byheart.domain.repository
 
 import com.gtr3.byheart.core.util.Result
 import com.gtr3.byheart.domain.model.CollabNote
+import com.gtr3.byheart.domain.model.CollabParticipant
 import com.gtr3.byheart.domain.model.CollabUpdateResult
 
 interface CollabRepository {
@@ -12,5 +13,6 @@ interface CollabRepository {
     suspend fun updateCollabNote(shareCode: String, title: String?, content: String?, version: Long): CollabUpdateResult
     suspend fun chatOnCollabNote(shareCode: String, message: String): Result<CollabNote>
     suspend fun refineSelection(shareCode: String, selectedText: String, instruction: String): Result<String>
+    suspend fun getParticipants(shareCode: String): Result<List<CollabParticipant>>
     suspend fun leaveCollabNote(shareCode: String): Result<Unit>
 }

@@ -16,3 +16,5 @@ data class UpdateProfileRequestDto(
     val dateOfBirth: String?,
     val sex: String?
 )
+
+data class GoogleSignInRequestDto(val idToken: String)

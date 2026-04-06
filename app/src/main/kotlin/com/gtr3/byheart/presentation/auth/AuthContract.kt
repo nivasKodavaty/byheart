@@ -12,6 +12,7 @@ sealed class AuthIntent {
     data class PasswordChanged(val value: String) : AuthIntent()
     data object Login : AuthIntent()
     data object Register : AuthIntent()
+    data class GoogleSignIn(val idToken: String) : AuthIntent()
 }
 
 sealed class AuthEffect {

@@ -64,6 +64,15 @@ class CollabNoteDetailViewModel @Inject constructor(
                 it.copy(reminderDays = days)
             }
             CollabNoteDetailIntent.NavigateBack             -> viewModelScope.launch { _effect.send(CollabNoteDetailEffect.NavigateBack) }
+            CollabNoteDetailIntent.ShowParticipants         -> loadParticipants()
+            CollabNoteDetailIntent.DismissParticipants      -> _state.update { it.copy(showParticipantsSheet = false) }
+            CollabNoteDetailIntent.OpenReminderSheet        -> _state.update { it.copy(showReminderSheet = true) }
+            CollabNoteDetailIntent.DismissReminderSheet     -> _state.update { it.copy(showReminderSheet = false) }
+            CollabNoteDetailIntent.ScheduleReminderNow      -> {
+                val note = _state.value.note ?: return
+                scheduleReminderIfNeeded(note.id, note.title)
+                _state.update { it.copy(showReminderSheet = false) }
+            }
         }
     }
 
@@ -206,6 +215,20 @@ class CollabNoteDetailViewModel @Inject constructor(
                 is Result.Success -> _effect.send(CollabNoteDetailEffect.NoteLeft)
                 is Result.Error   -> _effect.send(CollabNoteDetailEffect.ShowError(result.message))
                 else -> Unit
+            }
+        }
+    }
+
+    private fun loadParticipants() {
+        val shareCode = _state.value.note?.shareCode ?: return
+        viewModelScope.launch {
+            _state.update { it.copy(showParticipantsSheet = true, isParticipantsLoading = true) }
+            when (val result = collabRepository.getParticipants(shareCode)) {
+                is com.gtr3.byheart.core.util.Result.Success ->
+                    _state.update { it.copy(participants = result.data, isParticipantsLoading = false) }
+                is com.gtr3.byheart.core.util.Result.Error ->
+                    _state.update { it.copy(isParticipantsLoading = false) }
+                else -> _state.update { it.copy(isParticipantsLoading = false) }
             }
         }
     }

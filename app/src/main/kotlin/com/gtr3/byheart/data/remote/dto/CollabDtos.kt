@@ -30,6 +30,12 @@ data class CollabNoteDto(
     val messages: List<MessageDto> = emptyList()
 )
 
+data class ParticipantDto(
+    val email: String,
+    val displayName: String?,
+    val joinedAt: String
+)
+
 /** Parsed from the 409 error body when a concurrent save wins the race */
 data class ConflictResponseDto(
     val error: String = "conflict",

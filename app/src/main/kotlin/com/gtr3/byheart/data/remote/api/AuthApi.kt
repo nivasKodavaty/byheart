@@ -1,6 +1,7 @@
 package com.gtr3.byheart.data.remote.api
 
 import com.gtr3.byheart.data.remote.dto.AuthResponseDto
+import com.gtr3.byheart.data.remote.dto.GoogleSignInRequestDto
 import com.gtr3.byheart.data.remote.dto.LoginRequest
 import com.gtr3.byheart.data.remote.dto.ProfileDto
 import com.gtr3.byheart.data.remote.dto.RegisterRequest
@@ -17,6 +18,9 @@ interface AuthApi {
 
     @POST("api/auth/login")
     suspend fun login(@Body request: LoginRequest): AuthResponseDto
+
+    @POST("api/auth/google")
+    suspend fun googleSignIn(@Body request: GoogleSignInRequestDto): AuthResponseDto
 
     @GET("api/auth/profile")
     suspend fun getProfile(): ProfileDto

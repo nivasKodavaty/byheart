@@ -28,7 +28,9 @@ import androidx.compose.material.icons.automirrored.filled.FormatListBulleted
 import androidx.compose.material.icons.automirrored.filled.Redo
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.automirrored.filled.Undo
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.NotificationsNone
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -203,9 +205,10 @@ fun CollabNoteDetailScreen(
                 isSaving   = state.isSaving,
                 hasChanges = state.hasUnsavedChanges,
                 onBack     = { viewModel.onIntent(CollabNoteDetailIntent.NavigateBack) },
-                onSave     = { viewModel.onIntent(CollabNoteDetailIntent.SaveContent(richTextState.toHtml())) },
+                onSave      = { viewModel.onIntent(CollabNoteDetailIntent.SaveContent(richTextState.toHtml())) },
                 onShareCode = { viewModel.onIntent(CollabNoteDetailIntent.ShowShareCode) },
-                onLeave    = { viewModel.onIntent(CollabNoteDetailIntent.LeaveNote) }
+                onReminder  = { viewModel.onIntent(CollabNoteDetailIntent.OpenReminderSheet) },
+                onLeave     = { viewModel.onIntent(CollabNoteDetailIntent.LeaveNote) }
             )
         },
         containerColor = MaterialTheme.colorScheme.background
@@ -264,12 +267,18 @@ fun CollabNoteDetailScreen(
                                         Text("Edited by $it", style = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp), color = MaterialTheme.colorScheme.onSurfaceVariant)
                                         Text("·", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     }
-                                    Icon(Icons.Filled.Group, contentDescription = null, modifier = Modifier.size(12.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    Text(
-                                        "${note.participantCount} collaborator${if (note.participantCount != 1) "s" else ""}",
-                                        style = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp),
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                        modifier = Modifier.clickable { viewModel.onIntent(CollabNoteDetailIntent.ShowParticipants) }
+                                    ) {
+                                        Icon(Icons.Filled.Group, contentDescription = "View participants", modifier = Modifier.size(12.dp), tint = MaterialTheme.colorScheme.primary)
+                                        Text(
+                                            "${note.participantCount} collaborator${if (note.participantCount != 1) "s" else ""}",
+                                            style = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp),
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
                                 }
                             }
 
@@ -424,6 +433,28 @@ fun CollabNoteDetailScreen(
             onDismiss = { viewModel.onIntent(CollabNoteDetailIntent.DismissShareCode) }
         )
     }
+
+    // ── Participants sheet ─────────────────────────────────────────────────────
+    if (state.showParticipantsSheet) {
+        CollabParticipantsSheet(
+            participants = state.participants,
+            isLoading    = state.isParticipantsLoading,
+            onDismiss    = { viewModel.onIntent(CollabNoteDetailIntent.DismissParticipants) }
+        )
+    }
+
+    // ── Reminder sheet ─────────────────────────────────────────────────────────
+    if (state.showReminderSheet) {
+        CollabReminderSheet(
+            state     = state,
+            onToggle  = { viewModel.onIntent(CollabNoteDetailIntent.ReminderToggled) },
+            onTitleChange = { viewModel.onIntent(CollabNoteDetailIntent.ReminderTitleChanged(it)) },
+            onTimeChange  = { viewModel.onIntent(CollabNoteDetailIntent.ReminderTimeChanged(it)) },
+            onDayToggle   = { viewModel.onIntent(CollabNoteDetailIntent.ReminderDayToggled(it)) },
+            onSchedule    = { viewModel.onIntent(CollabNoteDetailIntent.ScheduleReminderNow) },
+            onDismiss     = { viewModel.onIntent(CollabNoteDetailIntent.DismissReminderSheet) }
+        )
+    }
 }
 
 // ── Top bar ───────────────────────────────────────────────────────────────────
@@ -436,6 +467,7 @@ private fun CollabDetailTopBar(
     onBack: () -> Unit,
     onSave: () -> Unit,
     onShareCode: () -> Unit,
+    onReminder: () -> Unit,
     onLeave: () -> Unit
 ) {
     var showLeaveConfirm by remember { mutableStateOf(false) }
@@ -486,6 +518,10 @@ private fun CollabDetailTopBar(
                         else Text("Save", color = MaterialTheme.colorScheme.onPrimary, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
                     }
                 }
+            }
+            // Reminder bell
+            IconButton(onClick = onReminder) {
+                Icon(Icons.Outlined.NotificationsNone, contentDescription = "Set reminder", tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             // Leave
             IconButton(onClick = { showLeaveConfirm = true }) {
@@ -772,6 +808,262 @@ private fun CollabShareCodeSheet(shareCode: String, onDismiss: () -> Unit) {
                 Icon(if (copied) Icons.Filled.Check else Icons.Filled.ContentCopy, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(8.dp))
                 Text(if (copied) "Copied!" else "Copy Code", fontWeight = FontWeight.SemiBold)
+            }
+        }
+    }
+}
+
+// ── Participants sheet ────────────────────────────────────────────────────────
+
+@Composable
+private fun CollabParticipantsSheet(
+    participants: List<com.gtr3.byheart.domain.model.CollabParticipant>,
+    isLoading: Boolean,
+    onDismiss: () -> Unit
+) {
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp)
+                .padding(bottom = 40.dp)
+        ) {
+            Text(
+                "Collaborators",
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+            )
+            Spacer(Modifier.height(16.dp))
+            if (isLoading) {
+                CircularProgressIndicator(modifier = Modifier.align(Alignment.CenterHorizontally))
+            } else if (participants.isEmpty()) {
+                Text(
+                    "No participants found.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else {
+                participants.forEach { p ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        // Avatar circle with initials
+                        val initials = (p.displayName?.take(2) ?: p.email.take(2)).uppercase()
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .background(MaterialTheme.colorScheme.primaryContainer, CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                initials,
+                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                        }
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                p.displayName ?: p.email.substringBefore("@"),
+                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                p.email,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
+                }
+            }
+        }
+    }
+}
+
+// ── Reminder sheet ────────────────────────────────────────────────────────────
+
+@Composable
+private fun CollabReminderSheet(
+    state: CollabNoteDetailState,
+    onToggle: () -> Unit,
+    onTitleChange: (String) -> Unit,
+    onTimeChange: (Long) -> Unit,
+    onDayToggle: (Int) -> Unit,
+    onSchedule: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    val isRepeating = state.reminderDays.isNotEmpty()
+    var showDatePicker by remember { mutableStateOf(false) }
+    var showTimePicker by remember { mutableStateOf(false) }
+    var pendingDateMillis by remember { mutableStateOf(0L) }
+
+    if (showDatePicker) {
+        val datePickerState = rememberDatePickerState(initialSelectedDateMillis = System.currentTimeMillis())
+        DatePickerDialog(
+            onDismissRequest = { showDatePicker = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    pendingDateMillis = datePickerState.selectedDateMillis ?: System.currentTimeMillis()
+                    showDatePicker = false
+                    showTimePicker = true
+                }) { Text("Next") }
+            },
+            dismissButton = { TextButton(onClick = { showDatePicker = false }) { Text("Cancel") } }
+        ) { DatePicker(state = datePickerState) }
+    }
+
+    if (showTimePicker) {
+        val timePickerState = rememberTimePickerState()
+        AlertDialog(
+            onDismissRequest = { showTimePicker = false },
+            title = { Text("Pick time") },
+            text = { TimePicker(state = timePickerState) },
+            confirmButton = {
+                TextButton(onClick = {
+                    val base = if (isRepeating) System.currentTimeMillis() else pendingDateMillis
+                    val cal = java.util.Calendar.getInstance().apply {
+                        timeInMillis = base
+                        set(java.util.Calendar.HOUR_OF_DAY, timePickerState.hour)
+                        set(java.util.Calendar.MINUTE, timePickerState.minute)
+                        set(java.util.Calendar.SECOND, 0)
+                        set(java.util.Calendar.MILLISECOND, 0)
+                    }
+                    onTimeChange(cal.timeInMillis)
+                    showTimePicker = false
+                }) { Text("Set") }
+            },
+            dismissButton = { TextButton(onClick = { showTimePicker = false }) { Text("Cancel") } }
+        )
+    }
+
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp)
+                .padding(bottom = 40.dp)
+        ) {
+            Text(
+                "Set Reminder",
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+            )
+            Spacer(Modifier.height(16.dp))
+
+            // Toggle row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        if (state.reminderEnabled) Icons.Filled.NotificationsActive else Icons.Outlined.NotificationsNone,
+                        contentDescription = null,
+                        tint = if (state.reminderEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    Column {
+                        Text("Enable reminder", style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium))
+                        Text("Get notified at a specific time", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+                Switch(
+                    checked = state.reminderEnabled,
+                    onCheckedChange = { onToggle() },
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor  = MaterialTheme.colorScheme.onPrimary,
+                        checkedTrackColor  = MaterialTheme.colorScheme.primary
+                    )
+                )
+            }
+
+            AnimatedVisibility(visible = state.reminderEnabled) {
+                Column {
+                    Spacer(Modifier.height(16.dp))
+
+                    // Day-of-week picker
+                    val dayLabels = listOf("M", "T", "W", "T", "F", "S", "S")
+                    Text("Repeat on", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Medium), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(Modifier.height(8.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        dayLabels.forEachIndexed { index, label ->
+                            val selected = index in state.reminderDays
+                            Surface(
+                                shape    = RoundedCornerShape(50),
+                                color    = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                                modifier = Modifier.size(38.dp).clickable { onDayToggle(index) }
+                            ) {
+                                Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                                    Text(
+                                        label,
+                                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                                        color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(12.dp))
+
+                    // Notification title
+                    TextField(
+                        value         = state.reminderTitle,
+                        onValueChange = onTitleChange,
+                        placeholder   = { Text("Notification title (optional)", style = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f))) },
+                        textStyle     = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onBackground),
+                        colors        = TextFieldDefaults.colors(
+                            focusedContainerColor   = MaterialTheme.colorScheme.surfaceVariant,
+                            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                            focusedIndicatorColor   = MaterialTheme.colorScheme.background,
+                            unfocusedIndicatorColor = MaterialTheme.colorScheme.background,
+                            cursorColor             = MaterialTheme.colorScheme.primary
+                        ),
+                        shape    = MaterialTheme.shapes.medium,
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+                    Spacer(Modifier.height(10.dp))
+
+                    // Time picker button
+                    OutlinedButton(
+                        onClick  = { if (isRepeating) showTimePicker = true else showDatePicker = true },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape    = MaterialTheme.shapes.medium
+                    ) {
+                        Icon(Icons.Outlined.NotificationsNone, null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            if (state.reminderTimeMillis > 0L) {
+                                val ldt = java.time.LocalDateTime.ofInstant(
+                                    java.time.Instant.ofEpochMilli(state.reminderTimeMillis),
+                                    java.time.ZoneId.systemDefault()
+                                )
+                                if (isRepeating) ldt.format(java.time.format.DateTimeFormatter.ofPattern("h:mm a"))
+                                else ldt.format(java.time.format.DateTimeFormatter.ofPattern("MMM d, yyyy 'at' h:mm a"))
+                            } else {
+                                if (isRepeating) "Pick time" else "Pick date & time"
+                            }
+                        )
+                    }
+                    Spacer(Modifier.height(16.dp))
+
+                    // Schedule button
+                    Button(
+                        onClick  = onSchedule,
+                        enabled  = state.reminderTimeMillis > 0L,
+                        modifier = Modifier.fillMaxWidth().height(50.dp),
+                        shape    = MaterialTheme.shapes.medium
+                    ) {
+                        Icon(Icons.Filled.NotificationsActive, null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Schedule Reminder", fontWeight = FontWeight.SemiBold)
+                    }
+                }
             }
         }
     }

@@ -5,6 +5,7 @@ import com.gtr3.byheart.core.util.Result
 import com.gtr3.byheart.data.remote.api.CollabApi
 import com.gtr3.byheart.data.remote.dto.*
 import com.gtr3.byheart.domain.model.CollabNote
+import com.gtr3.byheart.domain.model.CollabParticipant
 import com.gtr3.byheart.domain.model.CollabUpdateResult
 import com.gtr3.byheart.domain.model.Message
 import com.gtr3.byheart.domain.repository.CollabRepository
@@ -81,6 +82,13 @@ class CollabRepositoryImpl @Inject constructor(
             val response = api.refineSelection(shareCode, CollabRefineSelectionRequest(selectedText, instruction))
             Result.Success(response.replacement)
         }.getOrElse { Result.Error(it.message ?: "Refinement failed") }
+
+    override suspend fun getParticipants(shareCode: String): Result<List<CollabParticipant>> =
+        runCatching {
+            Result.Success(api.getParticipants(shareCode).map {
+                CollabParticipant(email = it.email, displayName = it.displayName, joinedAt = it.joinedAt)
+            })
+        }.getOrElse { Result.Error(it.message ?: "Failed to load participants") }
 
     override suspend fun leaveCollabNote(shareCode: String): Result<Unit> =
         runCatching {

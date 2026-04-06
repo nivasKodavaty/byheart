@@ -34,12 +34,26 @@ class AuthViewModel @Inject constructor(
             is AuthIntent.PasswordChanged -> _state.update { it.copy(password = intent.value) }
             AuthIntent.Login              -> login()
             AuthIntent.Register           -> register()
+            is AuthIntent.GoogleSignIn    -> loginWithGoogle(intent.idToken)
         }
     }
 
     private fun login() = viewModelScope.launch {
         _state.update { it.copy(isLoading = true, error = null) }
         when (val result = loginUseCase(_state.value.email, _state.value.password)) {
+            is Result.Success -> {
+                authRepository.saveToken(result.data.token, result.data.refreshToken)
+                _effect.send(AuthEffect.NavigateToNotes)
+            }
+            is Result.Error   -> _state.update { it.copy(error = result.message) }
+            else              -> Unit
+        }
+        _state.update { it.copy(isLoading = false) }
+    }
+
+    private fun loginWithGoogle(idToken: String) = viewModelScope.launch {
+        _state.update { it.copy(isLoading = true, error = null) }
+        when (val result = authRepository.loginWithGoogle(idToken)) {
             is Result.Success -> {
                 authRepository.saveToken(result.data.token, result.data.refreshToken)
                 _effect.send(AuthEffect.NavigateToNotes)

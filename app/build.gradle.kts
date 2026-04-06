@@ -18,6 +18,9 @@ android {
 
         // Base URL — machine's LAN IP for testing on a physical device
         buildConfigField("String", "BASE_URL", "\"http://10.0.2.2:8080/\"")
+
+        // Google OAuth2 Web Client ID (used as serverClientId for Credential Manager)
+        buildConfigField("String", "GOOGLE_WEB_CLIENT_ID", "\"189529960233-ea5bl5efis2qfcacjfj02bh745jup9p8.apps.googleusercontent.com\"")
     }
 
     buildTypes {
@@ -93,6 +96,11 @@ dependencies {
     implementation(libs.workmanager)
     implementation(libs.hilt.work)
     ksp(libs.hilt.work.compiler)
+
+    // Google Sign-In via Credential Manager
+    implementation(libs.credentials)
+    implementation(libs.credentials.play.services)
+    implementation(libs.googleid)
 
     // Coroutines
     implementation(libs.coroutines.android)

@@ -37,6 +37,9 @@ interface CollabApi {
         @Body request: CollabRefineSelectionRequest
     ): RefineSelectionResponse
 
+    @GET("api/collab/{shareCode}/participants")
+    suspend fun getParticipants(@Path("shareCode") shareCode: String): List<ParticipantDto>
+
     @DELETE("api/collab/{shareCode}/leave")
     suspend fun leaveCollabNote(@Path("shareCode") shareCode: String)
 }

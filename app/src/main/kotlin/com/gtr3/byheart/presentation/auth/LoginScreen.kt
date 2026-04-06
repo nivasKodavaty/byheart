@@ -20,6 +20,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -28,10 +29,13 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.credentials.exceptions.GetCredentialCancellationException
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.gtr3.byheart.core.auth.GoogleSignInHelper
 import com.gtr3.byheart.presentation.theme.AppleYellow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.launch
 
 @Composable
 fun LoginScreen(
@@ -39,10 +43,14 @@ fun LoginScreen(
     onNavigateToRegister: () -> Unit,
     viewModel: AuthViewModel = hiltViewModel()
 ) {
-    val state        by viewModel.state.collectAsStateWithLifecycle()
-    val focusManager = LocalFocusManager.current
-    var showPassword by remember { mutableStateOf(false) }
-    var visible      by remember { mutableStateOf(false) }
+    val state             by viewModel.state.collectAsStateWithLifecycle()
+    val focusManager      = LocalFocusManager.current
+    val activity          = LocalContext.current as android.app.Activity
+    val scope             = rememberCoroutineScope()
+    val googleSignInHelper = remember { GoogleSignInHelper() }
+    var showPassword      by remember { mutableStateOf(false) }
+    var visible           by remember { mutableStateOf(false) }
+    var googleError       by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) {
         visible = true
@@ -207,6 +215,82 @@ fun LoginScreen(
                                 "Sign In",
                                 style = MaterialTheme.typography.labelLarge.copy(fontSize = 15.sp)
                             )
+                        }
+                    }
+
+                    Spacer(Modifier.height(16.dp))
+
+                    // ── Divider ───────────────────────────────────────────────
+                    Row(
+                        modifier          = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        HorizontalDivider(modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.outlineVariant)
+                        Text(
+                            "  or  ",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                        )
+                        HorizontalDivider(modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.outlineVariant)
+                    }
+
+                    Spacer(Modifier.height(16.dp))
+
+                    // ── Google Sign-In ────────────────────────────────────────
+                    OutlinedButton(
+                        onClick  = {
+                            scope.launch {
+                                googleError = null
+                                runCatching { googleSignInHelper.signIn(activity) }
+                                    .onSuccess { idToken ->
+                                        viewModel.onIntent(AuthIntent.GoogleSignIn(idToken))
+                                    }
+                                    .onFailure { e ->
+                                        if (e !is GetCredentialCancellationException) {
+                                            googleError = e.message ?: "Google sign-in failed"
+                                        }
+                                    }
+                            }
+                        },
+                        enabled  = !state.isLoading,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(52.dp),
+                        shape  = MaterialTheme.shapes.medium,
+                        border = androidx.compose.foundation.BorderStroke(
+                            1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.4f)
+                        )
+                    ) {
+                        Text(
+                            "G",
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.ExtraBold),
+                            color = Color(0xFF4285F4)
+                        )
+                        Spacer(Modifier.width(10.dp))
+                        Text(
+                            "Continue with Google",
+                            style = MaterialTheme.typography.labelLarge.copy(fontSize = 15.sp),
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+
+                    // Google error message
+                    AnimatedVisibility(visible = googleError != null) {
+                        googleError?.let { err ->
+                            Column {
+                                Spacer(Modifier.height(8.dp))
+                                Surface(
+                                    shape = MaterialTheme.shapes.small,
+                                    color = MaterialTheme.colorScheme.errorContainer
+                                ) {
+                                    Text(
+                                        err,
+                                        style    = MaterialTheme.typography.bodySmall,
+                                        color    = MaterialTheme.colorScheme.onErrorContainer,
+                                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
+                                    )
+                                }
+                            }
                         }
                     }
 

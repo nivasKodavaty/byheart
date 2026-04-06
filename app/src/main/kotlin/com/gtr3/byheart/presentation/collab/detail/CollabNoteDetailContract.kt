@@ -1,6 +1,7 @@
 package com.gtr3.byheart.presentation.collab.detail
 
 import com.gtr3.byheart.domain.model.CollabNote
+import com.gtr3.byheart.domain.model.CollabParticipant
 import com.gtr3.byheart.domain.model.Message
 
 data class CollabNoteDetailState(
@@ -41,7 +42,15 @@ data class CollabNoteDetailState(
     val reminderDays: Set<Int> = emptySet(),
 
     // Share code display
-    val showShareCodeSheet: Boolean = false
+    val showShareCodeSheet: Boolean = false,
+
+    // Participants sheet
+    val participants: List<CollabParticipant> = emptyList(),
+    val showParticipantsSheet: Boolean = false,
+    val isParticipantsLoading: Boolean = false,
+
+    // Reminder sheet (post-creation)
+    val showReminderSheet: Boolean = false
 )
 
 sealed class CollabNoteDetailIntent {
@@ -67,6 +76,13 @@ sealed class CollabNoteDetailIntent {
     data class ReminderTimeChanged(val millis: Long) : CollabNoteDetailIntent()
     data class ReminderDayToggled(val dayIndex: Int) : CollabNoteDetailIntent()
     data object NavigateBack : CollabNoteDetailIntent()
+    // Participants
+    data object ShowParticipants : CollabNoteDetailIntent()
+    data object DismissParticipants : CollabNoteDetailIntent()
+    // Reminder sheet
+    data object OpenReminderSheet : CollabNoteDetailIntent()
+    data object DismissReminderSheet : CollabNoteDetailIntent()
+    data object ScheduleReminderNow : CollabNoteDetailIntent()
 }
 
 sealed class CollabNoteDetailEffect {

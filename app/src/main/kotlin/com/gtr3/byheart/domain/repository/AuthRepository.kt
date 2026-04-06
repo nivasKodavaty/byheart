@@ -10,6 +10,7 @@ interface AuthRepository {
     suspend fun saveToken(token: String, refreshToken: String)
     suspend fun getToken(): String?
     suspend fun clearToken()
+    suspend fun loginWithGoogle(idToken: String): Result<AuthResult>
     suspend fun getProfile(): Result<UserProfile>
     suspend fun updateProfile(displayName: String?, dateOfBirth: String?, sex: String?): Result<UserProfile>
 }
