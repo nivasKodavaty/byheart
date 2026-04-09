@@ -350,7 +350,14 @@ fun CollabNoteDetailScreen(
                                     val replacement = state.selectionReplacement ?: return@CollabSelectionReviewBar
                                     coroutineScope.launch {
                                         val fullHtml = richTextState.toHtml()
-                                        val newHtml  = spliceHtmlAtPlainRange(fullHtml, capturedRange.start, capturedRange.end, replacement)
+                                        val annotatedStr = richTextState.annotatedString
+                                        fun breaksBefore(pos: Int): Int =
+                                            annotatedStr.paragraphStyles.count {
+                                                it.end <= pos && it.end < annotatedStr.length
+                                            }
+                                        val htmlStart = capturedRange.start - breaksBefore(capturedRange.start)
+                                        val htmlEnd   = capturedRange.end   - breaksBefore(capturedRange.end)
+                                        val newHtml  = spliceHtmlAtPlainRange(fullHtml, htmlStart, htmlEnd, replacement)
                                         pushUndo(undoStack, fullHtml)
                                         redoStack.clear()
                                         isInitializing = true
@@ -1076,16 +1083,29 @@ private fun loadIntoEditor(richTextState: RichTextState, content: String) {
     else richTextState.setMarkdown(content)
 }
 
-private fun spliceHtmlAtPlainRange(html: String, start: Int, end: Int, replacement: String): String {
-    var plain = 0; var htmlIdx = 0
-    var startHtml = -1; var endHtml = -1
-    while (htmlIdx < html.length) {
-        if (startHtml == -1 && plain == start) startHtml = htmlIdx
-        if (endHtml   == -1 && plain == end)   endHtml   = htmlIdx
-        if (html[htmlIdx] == '<') { while (htmlIdx < html.length && html[htmlIdx] != '>') htmlIdx++; htmlIdx++ }
-        else { plain++; htmlIdx++ }
+private fun spliceHtmlAtPlainRange(html: String, plainStart: Int, plainEnd: Int, replacement: String): String {
+    if (plainStart >= plainEnd || html.isEmpty()) return html
+    var plain = 0
+    var i = 0
+    var htmlStart = -1
+    var htmlEnd = html.length
+
+    while (i < html.length) {
+        if (plain == plainEnd) { htmlEnd = i; break }
+        when {
+            html[i] == '<' -> { while (i < html.length && html[i] != '>') i++; i++ }
+            html[i] == '&' -> {
+                if (plain == plainStart) htmlStart = i
+                while (i < html.length && html[i] != ';') i++
+                i++; plain++
+            }
+            else -> {
+                if (plain == plainStart) htmlStart = i
+                i++; plain++
+            }
+        }
     }
-    if (startHtml == -1) startHtml = html.length
-    if (endHtml   == -1) endHtml   = html.length
-    return html.substring(0, startHtml) + replacement + html.substring(endHtml)
+
+    return if (htmlStart == -1) html
+    else html.substring(0, htmlStart) + replacement + html.substring(htmlEnd)
 }

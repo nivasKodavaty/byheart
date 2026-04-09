@@ -43,6 +43,8 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.gtr3.byheart.domain.model.Note
+import com.mohamedrejeb.richeditor.model.RichTextState
+import com.mohamedrejeb.richeditor.ui.material3.RichText
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import java.time.LocalDateTime
@@ -559,6 +561,17 @@ private fun SwipeableNoteCard(
 
 @Composable
 private fun NoteCard(note: Note, onClick: () -> Unit, onPin: () -> Unit) {
+    // Build a RichTextState for the snippet — parsed once per unique content value.
+    val hasContent = !note.content.isNullOrBlank()
+    val snippetState = remember(note.content) {
+        if (!hasContent) null
+        else RichTextState().also { state ->
+            val c = note.content!!
+            if (c.trimStart().startsWith("<")) state.setHtml(c)
+            else state.setMarkdown(c)
+        }
+    }
+
     Surface(
         modifier      = Modifier.fillMaxWidth(),
         shape         = RoundedCornerShape(16.dp),
@@ -583,8 +596,7 @@ private fun NoteCard(note: Note, onClick: () -> Unit, onPin: () -> Unit) {
                 )
                 Spacer(Modifier.height(4.dp))
 
-                // Date + snippet on one line
-                val snippet = note.content?.stripHtml()?.ifBlank { null }
+                // Date + formatted snippet on one line
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         text  = formatNoteDate(note.updatedAt),
@@ -592,11 +604,13 @@ private fun NoteCard(note: Note, onClick: () -> Unit, onPin: () -> Unit) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1
                     )
-                    if (snippet != null) {
-                        Text(
-                            text     = "  $snippet",
-                            style    = MaterialTheme.typography.bodySmall,
-                            color    = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
+                    if (snippetState != null) {
+                        Spacer(Modifier.width(6.dp))
+                        RichText(
+                            state    = snippetState,
+                            style    = MaterialTheme.typography.bodySmall.copy(
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f)
+                            ),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.weight(1f, fill = false)
@@ -693,12 +707,6 @@ private fun NoteSearchBar(
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
-
-private fun String.stripHtml(): String =
-    replace(Regex("<[^>]*>"), "")
-        .replace("&nbsp;", " ").replace("&amp;", "&")
-        .replace("&lt;", "<").replace("&gt;", ">")
-        .replace(Regex("\\s+"), " ").trim()
 
 private fun formatNoteDate(updatedAt: String): String {
     return try {

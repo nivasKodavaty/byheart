@@ -316,7 +316,20 @@ fun NoteDetailScreen(
                             val replacement = state.selectionReplacement ?: return@NoteViewEditScreen
                             coroutineScope.launch {
                                 val fullHtml = richTextState.toHtml()
-                                val newHtml = spliceHtmlAtPlainRange(fullHtml, capturedRange.start, capturedRange.end, replacement)
+                                val annotatedStr = richTextState.annotatedString
+                                // richeditor-compose uses a trailing space (not '\n') as the
+                                // paragraph separator in annotatedString.text. Each such space
+                                // has no HTML plain-text equivalent. Count the number of
+                                // paragraph-style ranges that END at or before the given position
+                                // (excluding the last range which has no trailing separator) to
+                                // get the correct HTML plain-text offset.
+                                fun breaksBefore(pos: Int): Int =
+                                    annotatedStr.paragraphStyles.count {
+                                        it.end <= pos && it.end < annotatedStr.length
+                                    }
+                                val htmlStart = capturedRange.start - breaksBefore(capturedRange.start)
+                                val htmlEnd   = capturedRange.end   - breaksBefore(capturedRange.end)
+                                val newHtml = spliceHtmlAtPlainRange(fullHtml, htmlStart, htmlEnd, replacement)
                                 pushUndo(undoStack, fullHtml)  // save pre-apply state
                                 redoStack.clear()
                                 isInitializing = true
